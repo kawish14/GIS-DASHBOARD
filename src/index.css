@@ -1,0 +1,233 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================
+   1. GLOBAL THEME VARIABLES
+   ========================================= */
+:root {
+  /* --- Color Palette (Dark & Blue) --- */
+  --bg-app: #0f1115;          /* Very dark blue-black for main background */
+  --bg-panel: #181b21;        /* Slightly lighter for sidebars/cards */
+  --bg-hover: #222730;        /* Hover state */
+  
+  --text-main: #60a5fa;       /* Bright Blue (Primary Text) */
+  --text-muted: #a0aab7;      /* Blue-Gray (Secondary Text) */
+  --text-highlight: #38bdf8;  /* Cyan/Sky Blue (Active/Focus) */
+  
+  --brand-color: #3b82f6;     /* Core Brand Blue */
+  --border-color: #2d3748;    /* Dark Blue-Gray Border */
+  
+  /* --- Calcite Overrides (The Magic) --- */
+  /* These force Calcite components to obey our theme */
+  --calcite-ui-brand: var(--brand-color);
+  --calcite-ui-brand-hover: var(--text-highlight);
+  
+  /* Text Colors */
+  --calcite-ui-text-1: var(--text-main);
+  --calcite-ui-text-2: var(--text-muted);
+  --calcite-ui-text-3:#2d3748;
+  
+  /* Background Colors */
+  --calcite-ui-foreground-1: var(--bg-panel);
+  --calcite-ui-foreground-2: var(--bg-app);
+  --calcite-ui-foreground-3: var(--bg-hover);
+  
+  /* Borders */
+  --calcite-ui-border-1: var(--border-color);
+  --calcite-ui-border-2: var(--border-color);
+  --calcite-ui-border-input: var(--border-color);
+}
+
+/* =========================================
+   2. GLOBAL RESETS & SCROLLBARS
+   ========================================= */
+body, html, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: 'Avenir Next', 'Helvetica Neue', sans-serif; /* Clean font */
+  overflow: auto; /* Prevent double scrollbars */
+  font-size: 90%;
+}
+
+/* Custom Scrollbar (Dark & Blue) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background-color: var(--bg-app);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #334155;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--brand-color);
+}
+
+/* =========================================
+   3. CALCITE COMPONENT OVERRIDES
+   ========================================= */
+
+/* Make Sidebars & Shells Dark */
+calcite-shell, 
+calcite-shell-panel, 
+calcite-panel {
+  background-color: var(--bg-app) !important;
+  --calcite-ui-foreground-1: var(--bg-panel); /* Inner Content */
+}
+
+/* Tabs: Selected State (Glowing Blue Underline) */
+calcite-tab-title {
+  color: var(--text-muted) !important;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+calcite-tab-title[selected] {
+  color: var(--text-highlight) !important;
+  border-bottom: 2px solid var(--text-highlight) !important;
+  background: rgba(59, 130, 246, 0.1) !important; /* Subtle blue tint */
+}
+
+calcite-tab-title:hover {
+  color: var(--text-highlight) !important;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* List Items (Customers / Faults) */
+calcite-list-item {
+  border-bottom: 1px solid var(--border-color) !important;
+}
+
+calcite-list-item:hover {
+  background-color: rgba(59, 130, 246, 0.08) !important; /* Light blue hover */
+  cursor: pointer;
+}
+
+/* Accordion Blocks (Collapsible Headers) */
+calcite-block {
+  --calcite-ui-foreground-1: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Action Bar (Icons on the side) */
+calcite-action-bar {
+  --calcite-ui-foreground-1: #111318; /* Darker than panel for contrast */
+  border-right: 1px solid var(--border-color);
+}
+
+calcite-action[active] {
+  --calcite-ui-icon-color: var(--text-highlight);
+  background-color: rgba(56, 189, 248, 0.15); /* Glow effect */
+  position: relative;
+}
+
+/* Add a blue line to the left of active actions */
+calcite-action[active]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--text-highlight);
+}
+
+/* Chips (The Status Badges) */
+calcite-chip {
+  font-weight: bold;
+  --calcite-ui-text-1: #fff; /* Keep text white for contrast on colored chips */
+}
+
+/* =========================================
+   4. UTILITY & CUSTOM CLASSES
+   ========================================= */
+
+/* Login Page Glassmorphism */
+.login-card {
+  background: rgba(24, 27, 33, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Map Container Transition */
+.map-view-container {
+  transition: opacity 0.5s ease-in-out;
+}
+
+/* Custom Loader Color */
+calcite-loader {
+  color: var(--brand-color) !important;
+}
+
+/* Dropdown Menus */
+calcite-dropdown-item[selected] {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: var(--text-highlight);
+}
+
+/* =========================================
+   FIX: FORCE LAYER VISIBILITY ICONS TO STAY VISIBLE
+   ========================================= */
+
+
+
+.esri-layer-list {
+  background-color: transparent !important; /* Let Calcite panel color show through */
+  color: var(--text-main) !important;
+  width: 100%;
+}
+
+/* 1. Force the toggle container to always be fully opaque */
+.esri-layer-list__item-toggle {
+    opacity: 1 !important; 
+    visibility: visible !important;
+    color: var(--text-muted); /* Default color for unchecked/hidden */
+}
+
+/* 2. Style for Checked/Visible Layers (The Eye) */
+.esri-layer-list__item-toggle[aria-checked="true"],
+.esri-layer-list__item-toggle .esri-icon-visible {
+    color: var(--text-highlight) !important; /* Cyan/Blue */
+    opacity: 1 !important;
+}
+
+/* 3. Style for Unchecked/Hidden Layers (The Slashed Eye) */
+.esri-layer-list__item-toggle[aria-checked="false"],
+.esri-layer-list__item-toggle .esri-icon-non-visible {
+    color: #4b5563 !important; /* Darker Gray */
+    opacity: 1 !important;
+}
+
+/* 4. Ensure the row background doesn't interfere */
+.esri-layer-list__item {
+    background-color: var(--bg-panel);
+    border-bottom: 1px solid var(--border-color);
+    padding: 2px 0; /* Compact spacing like Pro */
+    transition: background-color 0.3s ease;
+}
+
+/* 5. (Optional) hover effect for the row */
+.esri-layer-list__item:hover {
+    background-color: var(--bg-hover);
+}
+
+.esri-search__form {
+    flex-flow: row;
+    flex: 1 0;
+    align-items: stretch;
+    margin: 1.5px;
+    padding: 0px;
+    display: flex;
+}
+
+.flex.items-center.gap-4.profile-notification {
+  margin: 15px;
+}
