@@ -5,7 +5,7 @@ export default function POPBoundary() {
   const { layers, view } = useArcGIS();
 
   useEffect(() => {
-    if (Object.keys(layers).length === 0 || !layers.Feeder) return;
+    if (Object.keys(layers).length === 0 || !layers.pop_boundary) return;
 
     // 2. Create dynamic renderer (auto colors)
     generateDynamicRenderer(layers.pop_boundary);

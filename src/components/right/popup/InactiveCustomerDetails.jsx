@@ -7,7 +7,7 @@ import {
   CalciteNotice,
   CalciteAction
 } from "@esri/calcite-components-react";
-import { useArcGIS } from "../../../context/MapContext";
+import { useMapView, useLayers, usePopup } from "../../../context/MapContext";
 
 // --- Helper to Calculate Downtime ---
 const calculateDuration = (faultTimeStr) => {
@@ -42,7 +42,9 @@ const ALARM_LABELS = {
 };
 
 export default function InactiveCustomerDetails({ feature }) {
-  const { view, layers, setPopupFeature } = useArcGIS(); 
+  const { view } = useMapView();
+  const { layers } = useLayers();
+  const { setPopupFeature } = usePopup();
   const attr = feature.attributes;
 
   // Determine alarm info

@@ -1,8 +1,7 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect } from "react";
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
-import Extent from "@arcgis/core/geometry/Extent";
-import { useArcGIS } from "../../context/MapContext";
+import { useMapView } from "../../context/MapContext";
 import { useAuth } from "../../context/AuthContext";
 
 import GlobalClickHandler from "../../map_items/functional/GlobalClickHandler";
@@ -12,58 +11,66 @@ import VehicleTracking from '../../Realtime/vehicle/VehicleTracking';
 import CoordinateWidget from '../../map_items/widgets/CoordinateWidget'
 import HomeWidget from '../../map_items/widgets/HomeWidget'
 
+// Region -> default camera. Used both for the initial view and to re-center
+// the map if the user's region permissions arrive after the map has already
+// been created (the session check in AuthContext is async).
+const REGION_VIEWS = {
+  north: { center: [73.239156, 33.663228], scale: 144448 },
+  south: { center: [67.171837, 24.908468], scale: 144448 },
+  central: { center: [74.355626, 31.545676], scale: 144448 },
+};
+
+const DEFAULT_CENTER = [70.320449, 30.694832]; // Pakistan-wide management view
+const DEFAULT_SCALE = 5622324;
+
+function getRegionCamera(user) {
+  const regions = user?.permissions?.regions || [];
+  if (regions.length === 1) {
+    return REGION_VIEWS[regions[0].toLowerCase()] || null;
+  }
+  return null;
+}
 
 export default function MapViews({ isLoading }) {
   const mapDivRef = useRef(null);
-  const { setMap, setView, view, layers } = useArcGIS();
-  const {user} = useAuth();
+  const { setMap, setView, view } = useMapView();
+  const { user } = useAuth();
 
+  // Tracks whether we've already auto-centered on the user's region, so we
+  // don't fight the user if they've since panned/zoomed the map themselves.
+  const hasCenteredOnUserRef = useRef(false);
+
+  // 1. Create the map + view ONCE.
+  //
+  // BUG FIX: this used to read `user` inside the effect but had an empty
+  // dependency array, so if AuthContext's async session check hadn't
+  // resolved yet when this component first mounted, `user` was `null` and
+  // the map got permanently stuck on the default Pakistan view -- it never
+  // re-centered once the user's region loaded. We now create the map with
+  // whatever camera we can determine at mount time, and handle the
+  // "arrived late" case separately in effect #2 below (without tearing
+  // down and recreating the whole map, which would also destroy layers and
+  // any in-progress interaction).
   useEffect(() => {
     if (!mapDivRef.current) return;
 
-    // We define these variables right here, so they are ready immediately.
-    let initialCenter = [70.320449, 30.694832]; // Default (Pakistan Management view)
-    let initialScale = 5622324; 
-    let shouldZoom = false;
+    const regionCamera = getRegionCamera(user);
+    const initialCenter = regionCamera?.center ?? DEFAULT_CENTER;
+    const initialScale = regionCamera?.scale ?? DEFAULT_SCALE;
 
-    // Helper to normalize role string safely
-    const regions = user?.permissions?.regions || [];
-
-    if (regions.length === 1) {
-      const primaryRegion = regions[0].toLowerCase();
-      shouldZoom = true;
-
-    if (primaryRegion === 'north') {
-      initialCenter = [73.239156, 33.663228];
-      initialScale = 144448;
-    } 
-    else if (primaryRegion === 'south') {
-      initialCenter = [67.171837, 24.908468];
-      initialScale = 144448;
-    } 
-    else if (primaryRegion === 'central') {
-      initialCenter = [74.355626, 31.545676];
-      initialScale = 144448;
-    }
-  }
-
-    // 1. Initialize Map
     const mapInstance = new Map({
       basemap: "satellite",
     });
 
-    // 2. Initialize View
     const viewInstance = new MapView({
       container: mapDivRef.current,
       map: mapInstance,
       center: initialCenter,
       scale: initialScale,
       constraints: {
-        // limit how far they can zoom out (optional, based on your logic)
-        minScale: initialScale * 2, 
-        rotationEnabled: true, // Optional: keeps map facing north
+        minScale: initialScale * 2,
+        rotationEnabled: true,
       },
-      //extent: "bounds",
       popup: {
         dockEnabled: true,
         dockOptions: {
@@ -73,27 +80,41 @@ export default function MapViews({ isLoading }) {
         },
       },
       ui: {
-          components: ["zoom", "compass", "attribution"],
-        },
+        components: ["zoom", "compass", "attribution"],
+      },
     });
 
-
-    // 3. Save to Context when ready
     viewInstance.when(() => {
       setMap(mapInstance);
       setView(viewInstance);
+      if (regionCamera) {
+        hasCenteredOnUserRef.current = true;
+      }
     });
 
     return () => {
-      // Cleanup
       viewInstance.destroy();
       setView(null);
       setMap(null);
     };
-  }, []); // Run once on mount
+    // Intentionally run once on mount only -- see comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 2. If the user's region permissions weren't available at mount time,
+  // re-center as soon as they arrive, without recreating the map.
+  useEffect(() => {
+    if (!view || hasCenteredOnUserRef.current) return;
+
+    const regionCamera = getRegionCamera(user);
+    if (!regionCamera) return;
+
+    view.goTo({ center: regionCamera.center, scale: regionCamera.scale });
+    hasCenteredOnUserRef.current = true;
+  }, [view, user]);
 
   return (
-    <main className="flex-1 relative overflow-hidden bg-[#1a1a1a]" id="MapView">
+    <main className="flex-1 relative overflow-hidden bg-[#1a1a1a]" id="MapView" style={{ contain: "layout style paint", isolation: "isolate" }}>
       {/* Map Container - Added a slight fade-in transition */}
       <div
         ref={mapDivRef}

@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from "react";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer";
 import Graphic from "@arcgis/core/Graphic";
 import { socket } from "../socket";
-import { useArcGIS } from "../../context/MapContext";
+import { useMapView, useLayers } from "../../context/MapContext";
 import { useAuth } from "../../context/AuthContext";
 
 // --- PRO RENDERER: Define styles once, dynamically applied by the API ---
@@ -28,12 +28,13 @@ const vehicleRenderer = {
 };
 
 export default function VehicleTracking() {
-  const { view, registerLayer, unregisterLayer } = useArcGIS();
-  const {layerNames} = useAuth();
+  const { view } = useMapView();
+  const { registerLayer, unregisterLayer } = useLayers();
+  const { layerNames } = useAuth();
 
   // Track assigned ObjectIDs for fast updates
   const vehicleIndex = useRef(new Map());
-  let oidCounter = useRef(1);
+  const oidCounter = useRef(1);
   const layerRef = useRef(null);
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export default function VehicleTracking() {
         { name: "vehicle_make", type: "string" },
         { name: "symbol_key", type: "string" },
       ],
- 
+
     });
 
     const vehLabelClass = {
@@ -77,7 +78,7 @@ export default function VehicleTracking() {
       labelPlacement: "above-center", // Places label above the DC marker
       labelExpressionInfo: {
         // Change 'name' to whatever field holds the DC identifier in your attribute table (e.g., 'dc_id')
-        expression: `$feature.reg_no` 
+        expression: `$feature.reg_no`
       }
     };
 
@@ -86,13 +87,12 @@ export default function VehicleTracking() {
 
     view.map.add(vehicleLayer);
     layerRef.current = vehicleLayer;
-    
+
     // Register to context so the SearchWidget can find it!
     registerLayer("Vehicles", vehicleLayer);
 
     // 2. Listen to Socket and Batch Updates
-    socket.on("tracking", (data) => {
-      console.log("Received tracking data:", data);
+    const handleTracking = (data) => {
       const updates = [];
       const adds = [];
 
@@ -138,10 +138,12 @@ export default function VehicleTracking() {
 
       // Apply all changes to the GPU at once (High Performance)
       vehicleLayer.applyEdits({ addFeatures: adds, updateFeatures: updates });
-    });
+    };
+
+    socket.on("tracking", handleTracking);
 
     return () => {
-      socket.off("tracking");
+      socket.off("tracking", handleTracking);
       if (layerRef.current) {
         if (view && view.map) {
           view.map.remove(layerRef.current);
@@ -149,7 +151,7 @@ export default function VehicleTracking() {
         unregisterLayer("Vehicles");
       }
     };
-  }, [view]);
+  }, [view, layerNames, registerLayer, unregisterLayer]);
 
   return null;
 }

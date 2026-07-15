@@ -10,16 +10,14 @@ import {
   CalciteAction,
 } from "@esri/calcite-components-react";
 
-export default function JCDetails({ feature }) {
+export default function FATDetails({ feature }) {
   const attr = feature.attributes;
 
   const fields = useMemo(
     () => [
-      { label: "Joint ID", value: attr.id },
+      { label: "FAT ID", value: attr.id },
+      { label: "DC ID", value: attr.dc_id },
       { label: "POP", value: attr.pop_id },
-      { label: "Network", value: attr.network },
-      { label: "Type", value: attr.type },
-      { label: "Capacity", value: attr.capacity },
       { label: "Placement", value: attr.placement },
       { label: "Area", value: attr.area },
       { label: "Sub Area", value: attr.sub_area },
@@ -44,7 +42,7 @@ export default function JCDetails({ feature }) {
         gap: "2px",
       }}
     >
-      <CalciteBlock scale="s" heading={"Joint"} open collapsible={false}>
+      <CalciteBlock scale="s" heading={"FAT"} open collapsible={false}>
         <div slot="icon">
           <CalciteIcon icon="server" scale="s" />
         </div>

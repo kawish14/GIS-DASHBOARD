@@ -1,59 +1,20 @@
-import React, { useEffect, useState } from "react";
-import { useArcGIS } from "../../context/MapContext";
+import SymbologyLayer from "../symbology/SymbologyLayer";
 
+/**
+ * BEFORE: this file hardcoded the fiber_type field and its color mapping
+ * directly in JS (see the old version in your uploads). Changing which
+ * field drove symbology meant editing this file, rebuilding, redeploying.
+ *
+ * AFTER: symbology now lives in symbology-config.json under the
+ * "longhaul" key, loaded at runtime. This file is now just three lines --
+ * it stays as a component (rather than inlining <SymbologyLayer
+ * layerKey="longhaul" /> directly in Layers.jsx) only so Layers.jsx's
+ * import list doesn't have to change, keeping this a drop-in replacement.
+ *
+ * To point Longhaul at "lmp" instead of "fiber_type": edit the "longhaul"
+ * entry in symbology-config.json (see symbology-config.example.json for
+ * exactly what that edit looks like). No change needed here.
+ */
 export default function Longhaul() {
-    const { layers, view } = useArcGIS();
-
-    useEffect(() => {
-        if (Object.keys(layers).length === 0 || !layers.longhaul) return;
-        const region = "$feature.fiber_type";
-
-    const valueExpression = `When( ${region} == 'G.652-D', 'G.652-D', 
-    ${region} == 'G.652', 'G.652', 'other' )`;
-
-     var rendererCheck = {
-      type: "unique-value", // autocasts as new UniqueValueRenderer()
-      valueExpression: valueExpression,
-      uniqueValueInfos: [
-        {
-          value: "G.652-D", //02F AsBuilt
-          symbol: {
-            type: "simple-line",
-            color: "blue",
-            width: "3px",
-            style: "solid",
-          },
-        },
-        {
-          value: "G.652", // 04F AsBuilt
-          symbol: {
-            type: "simple-line",
-            color: "red",
-            width: "3px",
-            style: "solid",
-          },
-        },
-        {
-          value: "other", // 04F AsBuilt
-          symbol: {
-            type: "simple-line",
-            color: "black",
-            width: "3px",
-            style: "solid",
-          },
-        },
-      ],
-    };
-
-    layers.longhaul.renderer = rendererCheck;
-    layers.longhaul.visible = false
-
-     if (!view.map.layers.includes(layers.longhaul)){
-        view.map.add(layers.longhaul);
-     }
-     
-
-    }, [layers, view]);
-
-    return null;
+  return <SymbologyLayer layerKey="longhaul" defaultVisible={false} />;
 }

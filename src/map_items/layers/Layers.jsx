@@ -2,8 +2,9 @@ import { useEffect, useRef } from "react";
 import esriConfig from "@arcgis/core/config";
 import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer";
 import WMTSLayer from "@arcgis/core/layers/WMTSLayer";
+import WMSLayer from "@arcgis/core/layers/WMSLayer";
 import GroupLayer from "@arcgis/core/layers/GroupLayer";
-import { useArcGIS } from "../../context/MapContext";
+import { useLayers, useMapView } from "../../context/MapContext";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../../url";
 
@@ -23,7 +24,8 @@ esriConfig.request.timeout = 300000;
 
 export default function Layers(props) {
   const layerAddedRef = useRef(false);
-  const { view, registerLayer, unregisterLayer } = useArcGIS();
+  const { view } = useMapView();
+  const { registerLayer, unregisterLayer } = useLayers();
   const { layerNames, user } = useAuth();
 
   useEffect(() => {
@@ -76,6 +78,30 @@ export default function Layers(props) {
         registerLayer(displayTitle, wmtsLayer); */
         
         return; // 🛑 EXIT early so it doesn't run your GeoJSON logic below
+      }
+
+      if(layerName.toLowerCase().includes("landcover_evw")) {
+        // 1. Define your WMS Layer
+        const landCover = new WMSLayer({
+          url: api + "/geoserver/web_app/wms",
+          sublayers: [
+            {
+              name: "web_app:landcover_evw",
+              title: "Landcover (Imagery)",
+              visible: false,
+            },
+          ],
+          opacity: 0.8,
+          listMode: "hide", // Hides it from standard layer lists
+          title: "Landcover Base",
+        });
+
+        // 2. Add layer to the map dynamically
+        // The optional index '0' adds it to the very bottom of the drawing stack
+        view.map.add(landCover, 0);
+
+        createdLayers.push({ id: "landCover", instance: landCover });
+
       }
 
       // ==========================================

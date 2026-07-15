@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useArcGIS } from "../../../context/MapContext"; // Adjust path if needed
+import { useMapView, useLayers } from "../../../context/MapContext";
 import LayerItem from "./LayerItem";
 
 // Calcite Components
@@ -47,7 +47,8 @@ const LAYER_SEQUENCE = [
 ];
 
 export default function LayerListSidebar() {
-  const { view, layers } = useArcGIS();
+  const { view } = useMapView();
+  const { layers } = useLayers();
   const [mapLayers, setMapLayers] = useState([]);
   const [filterText, setFilterText] = useState("");
   

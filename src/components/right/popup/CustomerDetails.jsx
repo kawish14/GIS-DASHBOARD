@@ -1,76 +1,72 @@
 import React, { useEffect, useState } from "react";
 import { Realtime } from "../../../../url";
-import { 
-  CalciteList, 
-  CalciteListItem, 
-  CalciteChip, 
-  CalciteLoader, 
+import {
+  CalciteList,
+  CalciteListItem,
+  CalciteChip,
+  CalciteLoader,
   CalciteNotice,
   CalciteIcon,
   CalciteBlock,
   CalciteAction,
-  CalciteTable, 
-  CalciteTableRow, 
-  CalciteTableHeader, 
-  CalciteTableCell 
 } from "@esri/calcite-components-react";
-import { ArrowUp, ArrowDown, Circle  } from "lucide-react";
-import {api} from "../../../../url";
-import { useArcGIS } from "../../../context/MapContext";
+import { api } from "../../../../url";
+import { useMapView, useLayers, usePopup } from "../../../context/MapContext";
+import { escapeForCql } from "../../../constants/faultCodes";
 
 // --- 1. System Status Logic ---
 const getSystemStatus = (alarmstate) => {
   const state = parseInt(alarmstate, 10);
 
   if (state === 0) {
-    return { 
-      kind: "success", 
-      icon: "check-circle", 
-      label: "Fault Cleared", 
-      isUp: true 
+    return {
+      kind: "success",
+      icon: "check-circle",
+      label: "Fault Cleared",
+      isUp: true
     };
   }
 
   if (state === 1 || state === 2) {
-    return { 
-      kind: "danger", 
-      icon: "exclamation-mark-triangle", 
-      label: "Fault Detected", 
-      isUp: false 
+    return {
+      kind: "danger",
+      icon: "exclamation-mark-triangle",
+      label: "Fault Detected",
+      isUp: false
     };
   }
 
   if (state === 3 || state === 4) {
-    return { 
-      kind: "warning", 
-      icon: "exclamation-mark-circle", 
-      label: "Fault Detected", 
-      isUp: true 
+    return {
+      kind: "warning",
+      icon: "exclamation-mark-circle",
+      label: "Fault Detected",
+      isUp: true
     };
   }
 
-  return { 
-    kind: "neutral", 
-    icon: "question", 
-    label: "Unknown State", 
-    isUp: false 
+  return {
+    kind: "neutral",
+    icon: "question",
+    label: "Unknown State",
+    isUp: false
   };
 };
 
 // --- 2. Power Logic (Thresholds) ---
 const optical_threshold = (data) => {
-  if (!data) return { 
-    ontText: "---", oltText: "---", 
-    ontKind: "neutral", oltKind: "neutral" 
+  if (!data) return {
+    ontText: "---", oltText: "---",
+    ontKind: "neutral", oltKind: "neutral"
   };
 
   const threshold = -26.0;
   const ontPower = data.opticsrxpower / 100;
   const oltPower = data.opticsrxpowerbyolt / 100;
 
-  const getKind = (power, isOlt = false) => {
+  const getKind = (power) => {
     if (isNaN(power)) return "neutral";
-    if (power < threshold || power > 0) return "red"; 
+    if (power < threshold || power > 0) return "red";
     return "green";
   };
 
@@ -78,15 +74,18 @@ const optical_threshold = (data) => {
     ontText: isNaN(ontPower) ? "---" : `${ontPower.toFixed(2)} dBm`,
     oltText: isNaN(oltPower) ? "---" : `${oltPower.toFixed(2)} dBm`,
     ontKind: getKind(ontPower),
-    oltKind: getKind(oltPower, true)
+    oltKind: getKind(oltPower)
   };
 };
 
-const getFaultDuration = (attributes) => {
-  const { fault_time, category } = attributes;
-  if (!fault_time || category !== "fault") return null;
+// BUG FIX: this used to be computed once from the feature's attributes at
+// render time with no ticking clock, so the "Duration" chip in the UI froze
+// at whatever value it had the moment the panel opened. It's now recomputed
+// every second via the interval in the component below.
+const getFaultDuration = (faultTime, category) => {
+  if (!faultTime || category !== "fault") return null;
 
-  const diff = new Date() - new Date(fault_time);
+  const diff = new Date() - new Date(faultTime);
   if (diff <= 0) return "Just started";
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -123,35 +122,53 @@ const fieldsToDisplay = [
 ];
 
 export default function CustomerDetails({ feature }) {
-  const { view, layers, setPopupFeature } = useArcGIS(); 
+  const { view } = useMapView();
+  const { layers } = useLayers();
+  const { setPopupFeature } = usePopup();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   // Initial Data
   const initialAttr = feature.attributes;
   const status = getSystemStatus(initialAttr.alarmstate);
-  const durationStr = getFaultDuration(initialAttr);
+
+  // Live-ticking duration: recomputed every second, and driven by the
+  // freshest fault_time we have (fetched `data`, falling back to the
+  // feature's initial attributes before the fetch resolves).
+  const faultTime = data?.fault_time ?? initialAttr.fault_time;
+  const faultCategory = data?.category ?? initialAttr.category;
+  const durationStr = getFaultDuration(faultTime, faultCategory);
+
+  useEffect(() => {
+    if (!faultTime || faultCategory !== "fault") return;
+    const intervalId = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(intervalId);
+  }, [faultTime, faultCategory]);
+  // `now` itself isn't read directly -- setting it just forces a re-render
+  // so getFaultDuration() re-evaluates against the current time each tick.
+  void now;
 
   const handleDcClick = async (dc_id) => {
-    if (!view || !layers || !layers.dc_odb) { 
+    if (!view || !layers || !layers.dc_odb) {
         console.error("DC Layer not found");
         return;
     }
 
     try {
-        const dcLayer = layers.dc_odb; 
+        const dcLayer = layers.dc_odb;
         const query = dcLayer.createQuery();
-        query.where = `id = '${dc_id}'`; 
-        query.returnGeometry = true;    
+        query.where = `id = '${escapeForCql(dc_id)}'`;
+        query.returnGeometry = true;
         query.outFields = ["*"];
 
         const results = await dcLayer.queryFeatures(query);
 
         if (results.features.length > 0) {
             const dcFeature = results.features[0];
-            dcFeature.layer = dcLayer; 
+            dcFeature.layer = dcLayer;
 
             view.goTo({ target: dcFeature, zoom: 17 });
             setPopupFeature(dcFeature);
@@ -171,8 +188,8 @@ export default function CustomerDetails({ feature }) {
       setError(false);
       try {
         const id = feature.attributes.id;
-        
-        const geoServerUrl = `${api}/geoserver/web_app/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=web_app%3ACustomers_test&outputFormat=application%2Fjson&CQL_FILTER=id='${id}'`;
+
+        const geoServerUrl = `${api}/geoserver/web_app/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=web_app%3ACustomers_test&outputFormat=application%2Fjson&CQL_FILTER=id='${encodeURIComponent(escapeForCql(id))}'`;
         const geoRes = await fetch(geoServerUrl);
         const geoData = await geoRes.json();
 
@@ -187,7 +204,7 @@ export default function CustomerDetails({ feature }) {
           method: "POST", headers: { "Content-Type": "application/json" },
         });
         const powerResult = await powerRes.json();
-        
+
         const powerInfo = optical_threshold(powerResult.data?.[0]);
 
         if (isMounted) setData({ ...fresh, _powerInfo: powerInfo });
@@ -208,7 +225,7 @@ export default function CustomerDetails({ feature }) {
     if (!data) return null;
 
     let val = data[field.key] ?? data[field.key.toLowerCase()] ?? "N/A";
-    
+
     let chipColor = "neutral";
     let chipText = 'var(--calcite-ui-text-2)';
     let isChip = false;
@@ -216,7 +233,7 @@ export default function CustomerDetails({ feature }) {
 
     if (field.highlight) {
        isChip = true;
-       icon = "graph-time-series"; 
+       icon = "graph-time-series";
        if (field.key === "ontText") {
           val = data._powerInfo.ontText;
           chipColor = data._powerInfo.ontKind;
@@ -240,23 +257,23 @@ export default function CustomerDetails({ feature }) {
     }
 
     const selectionStyle = {
-        userSelect: "text", 
-        WebkitUserSelect: "text", 
+        userSelect: "text",
+        WebkitUserSelect: "text",
         cursor: "text"
     };
 
     return (
-      <CalciteListItem 
-        key={field.key} 
+      <CalciteListItem
+        key={field.key}
         scale="s"
         label={field.label}
         description={field.group || null}
       >
-        <div slot="content-end" 
-            onMouseDown={(e) => e.stopPropagation()} 
+        <div slot="content-end"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
-            style={{ 
-                alignSelf: 'stretch', 
+            style={{
+                alignSelf: 'stretch',
                 display: 'flex',
                 alignItems: 'center',
                 borderLeft: '1px solid var(--calcite-ui-text-3)',
@@ -270,26 +287,26 @@ export default function CustomerDetails({ feature }) {
               }}
              >
             {isChip ? (
-                <CalciteChip 
-                    scale="s" 
+                <CalciteChip
+                    scale="s"
                     icon={icon}
                     style={{
                       ...selectionStyle,
-                      ...(chipColor === "yellow" ? { 
+                      ...(chipColor === "yellow" ? {
                                 "--calcite-chip-background-color": chipColor,
                                 "--calcite-chip-text-color" : chipText
-                                } 
-                      : 
+                                }
+                      :
                       {  "--calcite-chip-background-color": chipColor})
                     }}
                 >
                     {val}
                 </CalciteChip>
             ) : (
-                <span style={{ 
+                <span style={{
                     ...selectionStyle,
                     fontWeight:"bold" ,
-                    fontSize: "0.75rem", 
+                    fontSize: "0.75rem",
                     color: chipText ? chipText : "var(--calcite-ui-text-2)",
                     marginRight: field.isLink ? "8px" : "0"
                     }}
@@ -303,7 +320,7 @@ export default function CustomerDetails({ feature }) {
                   scale="s"
                   icon="launch"
                   title="Go to DC"
-                  text="Go to DC" 
+                  text="Go to DC"
                   onClick={() => handleDcClick(val)}
                   style={{ marginRight: "-8px" }}
                 />
@@ -316,7 +333,7 @@ export default function CustomerDetails({ feature }) {
   // --- Strict Target Logic: Match Warning ONLY if it's an LOP Alarm State ---
   const currentAlarmState = parseInt(data?.alarmstate ?? feature.attributes.alarmstate, 10);
   const checkSeverity = data?.perceived_severity ?? feature.attributes.perceived_severity;
-  
+
   // Must be alarmstate 4 AND have 'warning' string value
   const isWarningSeverity = currentAlarmState === 4 && checkSeverity?.toString().toLowerCase() === "warning";
 
@@ -354,7 +371,7 @@ export default function CustomerDetails({ feature }) {
               color: status.isUp ? "#41ff07" : "#ff0707",
               fontSize: "10px",
               fontWeight: "bold",
-              textTransform: "uppercase", 
+              textTransform: "uppercase",
               letterSpacing: "0.5px",
               marginRight:"12px",
               marginTop:"12px"
@@ -385,7 +402,7 @@ export default function CustomerDetails({ feature }) {
             style={{ marginBottom: "1rem" }}
           >
             <div slot="title">Duration</div>
-            
+
             <div slot="message" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <CalciteChip
                 scale="s"
@@ -399,8 +416,8 @@ export default function CustomerDetails({ feature }) {
                 <CalciteChip
                   scale="s"
                   icon="exclamation-mark-triangle"
-                  style={{ 
-                    "--calcite-chip-background-color": "#ff4500", 
+                  style={{
+                    "--calcite-chip-background-color": "#ff4500",
                     "color": "white",
                     "fontWeight": "bold"
                   }}

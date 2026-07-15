@@ -9,11 +9,12 @@ import {
   CalciteNotice,
   CalciteAction
 } from "@esri/calcite-components-react";
-import { useArcGIS } from "../../../context/MapContext";
-
 export default function DistributionDetails({ feature }) {
 
-    const {view, layers, setPopupFeature} = useArcGIS();
+    // view/layers/setPopupFeature were destructured here previously but
+    // never actually used in this component -- removed entirely instead of
+    // migrating to the new hooks, since subscribing to context state you
+    // don't use just adds unnecessary re-renders for no benefit.
     const attr = feature.attributes;
 
       const fields = useMemo(() => [

@@ -1,0 +1,44 @@
+{
+  "_comment": "Served at runtime as /symbology-config.json (or via your API). Editing this file changes map symbology immediately for anyone who reloads the page, or instantly for connected users if your backend broadcasts a 'symbology-updated' socket event after saving (see useSymbologyLiveReload.js). No frontend rebuild or redeploy needed.",
+
+  "longhaul": {
+    "type": "unique-value",
+    "field": "fiber_type",
+    "visible": false,
+    "defaultSymbol": { "color": "#000000", "width": 3, "style": "solid" },
+    "values": [
+      { "value": "G.652-D", "color": "#0000ff", "width": 3, "style": "solid" },
+      { "value": "G.652", "color": "#ff0000", "width": 3, "style": "solid" }
+    ]
+  },
+
+  "_longhaul_switched_to_lmp_example": {
+    "_comment": "This is what management asking to switch Longhaul from fiber_type to lmp looks like: rename this key to 'longhaul' (replacing the block above) -- that's it. No code change. If lmp is a numeric loss value rather than a category, use class-breaks (min/max ranges) instead of unique-value, as shown here.",
+    "type": "unique-value",
+    "field": "lmp",
+    "visible": false,
+    "defaultSymbol": { "color": "#000000", "width": 3, "style": "solid" },
+    "values": [
+      { "value": "Wateen", "color": "#0000ff", "width": 3, "style": "solid" },
+      { "value": "TWA", "color": "#0000ff", "width": 3, "style": "dash-dot" },
+      { "value": "GCS", "color": "#00000a", "width": 3, "style": "solid" },
+      { "value": "SES", "color": "#acc906", "width": 3, "style": "solid" },
+      { "value": "MPPL", "color": "#06c93d", "width": 3, "style": "solid" },
+      { "value": "Jazz", "color": "#c90606", "width": 3, "style": "solid" },
+      { "value": "Nayatel", "color": "#ed2b89", "width": 3, "style": "solid"},
+      { "value": "null", "color": "#f7f7f7", "width": 3, "style": "solid" }
+    ]
+  },
+
+  "dc_odb": {
+    "_comment": "Example for a point layer -- migrate DC.jsx into this shape the same way Longhaul was migrated.",
+    "type": "unique-value",
+    "field": "type",
+    "visible": true,
+    "defaultSymbol": { "color": "#888888", "size": 8, "markerStyle": "circle" },
+    "values": [
+      { "value": "FDC", "color": "#1f91f3", "size": 9, "markerStyle": "square" },
+      { "value": "PDC", "color": "#f39c12", "size": 9, "markerStyle": "diamond" }
+    ]
+  }
+}

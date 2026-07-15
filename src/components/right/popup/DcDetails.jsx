@@ -9,7 +9,7 @@ import {
   CalciteIcon
 } from "@esri/calcite-components-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Label } from "recharts";
-import { useArcGIS } from "../../../context/MapContext";
+import { useMapView, useLayers, usePopup } from "../../../context/MapContext";
 import { Realtime } from "../../../../url";
 
 const COLORS = {
@@ -76,11 +76,9 @@ const MetricItem = ({ label, count, color, total, onClick, isActive }) => {
 };
 
 export default function DcDetail({ feature }) {
-  const { 
-    view, layers, setPopupFeature, layerView, popupFeature, 
-    setSelectedFeatures , highlightHandleRef
-
-  } = useArcGIS(); 
+  const { view } = useMapView();
+  const { layers, layerView } = useLayers();
+  const { setPopupFeature, popupFeature, setSelectedFeatures, highlightHandleRef } = usePopup();
   const attr = feature.attributes;
 
   const [chartData, setChartData] = useState([]);

@@ -1,20 +1,30 @@
 import React, { useEffect, useRef } from "react";
-import * as reactiveUtils from "@arcgis/core/core/reactiveUtils"; 
+import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 import { socket } from "../socket";
-import { useArcGIS } from "../../context/MapContext";
+import { useLayers, useMapView, useStats } from "../../context/MapContext";
 import { useAuth } from "../../context/AuthContext";
 import Graphic from "@arcgis/core/Graphic";
 import { RotatingMarkers } from "./RotatingMarkers";
+import { createEmptyRegionStats } from "../../constants/faultCodes";
 
 export default function Realtime() {
-  const { layers, view, setAlertCount, setRealtimeStats, realtimeStats } = useArcGIS();
+  const { layers } = useLayers();
+  const { view } = useMapView();
+  const { setAlertCount, setRealtimeStats } = useStats();
   const { user } = useAuth();
-  
-  const alertBuffer = useRef(new Map()); 
+
+  const alertBuffer = useRef(new Map());
   const isProcessing = useRef(false);
   const isInitialized = useRef(false);
 
-  let isMounted = true;
+  // BUG FIX: `isMounted` used to be a plain `let` re-created every render
+  // and never actually read anywhere -- it did nothing. This ref is the
+  // real guard, checked before any post-await state update below.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   // --- HELPER: Recalculate Stats from LayerView ---
   const refreshFaultStats = async (layer) => {
@@ -25,17 +35,12 @@ export default function Realtime() {
 
       const query = layer.createQuery();
       query.where = "alarmstate IN (1, 2, 3, 4)";
-      // Added perceived_severity to outFields query configuration
       query.outFields = ["region", "alarmstate", "lastdowntime", "perceived_severity"];
-      
-      const results = await layer.queryFeatures(query);
 
-      // Default Structure incorporating 4_warning
-      const newStats = {
-        North: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0, "4_warning": 0 },
-        South: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0, "4_warning": 0 },
-        Central: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0, "4_warning": 0 }
-      };
+      const results = await layer.queryFeatures(query);
+      if (!isMountedRef.current) return;
+
+      const newStats = createEmptyRegionStats();
 
       results.features.forEach((feature) => {
         const region = feature.attributes.region;
@@ -52,7 +57,6 @@ export default function Realtime() {
               newStats[region][2]++;
             }
           } else if (state === 4) {
-            // Check for normalized severity match
             if (severity && severity.toString().toLowerCase() === "warning") {
               newStats[region]["4_warning"]++;
             } else {
@@ -81,7 +85,7 @@ export default function Realtime() {
     const layer = layers.Customers_test;
 
     try {
-      let allowedStates = [1, 2, 3, 4]; 
+      let allowedStates = [1, 2, 3, 4];
       const cql = layer.customParameters?.CQL_FILTER || "";
 
       const matchEqual = cql.match(/alarmstate\s*=\s*(\d+)/);
@@ -97,18 +101,20 @@ export default function Realtime() {
       alertBuffer.current.clear();
 
       const idsToCheck = alertsToProcess.map(a => `'${a.id}'`).join(",");
-      
+
       const query = layer.createQuery();
       query.where = `id IN (${idsToCheck})`;
       query.outFields = ["*"];
-      
+
       const existingResult = await layer.queryFeatures(query);
+      if (!isMountedRef.current) return;
+
       const existingFeaturesMap = new Map();
       existingResult.features.forEach(f => existingFeaturesMap.set(f.attributes.id, f));
 
       const updates = [];
       const adds = [];
-      const deletes = []; 
+      const deletes = [];
 
       alertsToProcess.forEach(alert => {
         const existingGraphic = existingFeaturesMap.get(alert.id);
@@ -121,15 +127,12 @@ export default function Realtime() {
             updatedGraphic.attributes.type = alert.type;
             updatedGraphic.attributes.alarmstate = alert.alarmstate;
             updatedGraphic.attributes.alarminfo = alert.alarminfo;
-
-            // Update perceived_severity property dynamically when an alert update hits the stream
             updatedGraphic.attributes.perceived_severity = alert.perceived_severity ? alert.perceived_severity : updatedGraphic.attributes.perceived_severity;
-
             updatedGraphic.attributes.lastDownCause = alert.lastDownCause ? alert.lastDownCause : updatedGraphic.attributes.lastDownCause;
             updatedGraphic.attributes.lastdowntime = alert.lastdowntime ? alert.lastdowntime : updatedGraphic.attributes.lastdowntime;
             updatedGraphic.attributes.lastuptime = alert.lastuptime ? alert.lastuptime : updatedGraphic.attributes.lastuptime;
             updatedGraphic.attributes.fault_time = alert.faultTime ? alert.faultTime : updatedGraphic.attributes.fault_time;
-            
+
             updates.push(updatedGraphic);
           } else {
             deletes.push(existingGraphic);
@@ -158,7 +161,7 @@ export default function Realtime() {
                 lastuptime: alert.lastuptime,
                 fault_time: alert.faultTime,
                 category: alert.category,
-                perceived_severity: alert.perceived_severity, // Capture initial severity value
+                perceived_severity: alert.perceived_severity,
                 olt: alert.olt, frame: alert.frame, slot: alert.slot, port: alert.port, ontid: alert.ontid
               },
             });
@@ -168,14 +171,14 @@ export default function Realtime() {
       });
 
       if (updates.length > 0 || adds.length > 0 || deletes.length > 0) {
-        await layer.applyEdits({ 
-          addFeatures: adds, 
+        await layer.applyEdits({
+          addFeatures: adds,
           updateFeatures: updates,
-          deleteFeatures: deletes 
+          deleteFeatures: deletes
         });
       }
 
-      RotatingMarkers(null, layer, view); 
+      RotatingMarkers(null, layer, view);
       await refreshFaultStats(layer);
 
     } catch (err) {
@@ -184,24 +187,19 @@ export default function Realtime() {
       isProcessing.current = false;
     }
   };
-  
+
   useEffect(() => {
-    if (!view || !layers.Customers_test) return;
-    
+    if (!view || !layers.Customers_test || !user) return;
+
     if (!isInitialized.current) {
-        const initialStats = {
-          North: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0, "4_warning": 0 },
-          South: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0, "4_warning": 0 },
-          Central: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0, "4_warning": 0 }
-        };
-        setRealtimeStats(initialStats);
+        setRealtimeStats(createEmptyRegionStats());
         isInitialized.current = true;
     }
-    
-    const onSocketAlert = (alert) => {
-      if (!user || !user.permissions || !user.permissions.regions) return;
 
-      const userRegions = user.permissions.regions; 
+    const onSocketAlert = (alert) => {
+      if (!user?.permissions?.regions) return;
+
+      const userRegions = user.permissions.regions;
       const alertRegion = alert.region;
       const isRegionMatch = userRegions.includes(alertRegion);
 
@@ -220,7 +218,7 @@ export default function Realtime() {
       if (alertBuffer.current.size > 0) {
         processBatch();
       }
-    }, 2000); 
+    }, 2000);
 
     RotatingMarkers(null, layers.Customers_test, view);
     refreshFaultStats(layers.Customers_test);
@@ -229,10 +227,14 @@ export default function Realtime() {
       socket.off("alerts", onSocketAlert);
       socket.off("regional_alert_count", onRegionalStats);
       clearInterval(intervalId);
-      isMounted = false;
       setRealtimeStats(null);
     };
-  }, [view, layers, setAlertCount]);
+    // BUG FIX: `user` is now a dependency. Previously it was read inside
+    // onSocketAlert but missing from the dependency array, so if the
+    // session refreshed with a different user/region set mid-session, the
+    // socket handler kept checking incoming alerts against the stale,
+    // captured `user` from the first render.
+  }, [view, layers.Customers_test, user, setAlertCount, setRealtimeStats]);
 
   return null;
 }

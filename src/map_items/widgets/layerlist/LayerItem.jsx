@@ -39,6 +39,7 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
 
   // Sync state with map changes
   useEffect(() => {
+    console.log(layer.title)
     const handle = reactiveUtils.watch(
       () => [layer.visible, layer.opacity, layer.labelsVisible],
       ([visible, op, lbls]) => {
@@ -82,6 +83,9 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
   const handleVisibilityToggle = (e) => {
     e.stopPropagation();
     layer.visible = !layer.visible;
+
+    console.log(layer.title, "visibility toggled to", layer.visible);
+
   };
 
   const handleOpacityChange = (e) => {

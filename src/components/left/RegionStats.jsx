@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect } from "react";
 import {
   CalciteList,
   CalciteListItem,
@@ -7,18 +7,18 @@ import {
   CalciteIcon,
   CalciteNotice,
   CalciteProgress,
-  CalciteButton
 } from "@esri/calcite-components-react";
-import { useArcGIS } from "../../context/MapContext";
+import { useLayers, useMapView } from "../../context/MapContext";
+import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS } from "../../constants/faultCodes";
 
-export default function RegionStats({ 
-  region, alertCount, realtimeStats, selectedFault, setSelectedFault 
+export default function RegionStats({
+  region, alertCount, realtimeStats, selectedFault, setSelectedFault
 }) {
-  const { layers, view, customerLayerView } = useArcGIS();
+  const { customerLayerView } = useLayers();
+  const { view } = useMapView();
 
   const handleFaultClick = (faultType) => {
     setSelectedFault(prev => prev === faultType ? null : faultType);
-    console.log("customerLayerView", customerLayerView)
   };
 
   useEffect(() => {
@@ -30,33 +30,29 @@ export default function RegionStats({
     }
 
     const date = new Date();
-    date.setDate(date.getDate() - 7);
+    date.setDate(date.getDate() - STALE_FAULT_WINDOW_DAYS);
     const complete_date = date.toISOString().split("T")[0];
 
     let whereClause = "";
 
-    // Updated Logic for distinct fault states, splitting both 2 and 4
     switch (selectedFault) {
-      case 1: // Power Off
-        whereClause = "alarmstate = 1";
+      case FAULT_CODES.POWER_OFF: // Power Off
+        whereClause = `alarmstate = ${FAULT_CODES.POWER_OFF}`;
         break;
-      case 2: // Link Down (New - < 7 days)
-        whereClause = "alarmstate = 2"; // Fallback/Original or matching state
+      case DERIVED_FAULT_CODES.LINK_DOWN_RECENT: // Link Down (< 7 days)
+        whereClause = `alarmstate = ${FAULT_CODES.LINK_DOWN} AND lastdowntime >= '${complete_date}'`;
         break;
-      case "2_stale": // Link Down (New - < 7 days from UI click mapping)
-        whereClause = `alarmstate = 2 AND lastdowntime >= '${complete_date}'`;
+      case DERIVED_FAULT_CODES.LINK_DOWN_STALE: // Link Down (>= 7 days)
+        whereClause = `alarmstate = ${FAULT_CODES.LINK_DOWN} AND lastdowntime <= '${complete_date}'`;
         break;
-      case "2_long": // Link Down (Stale - > 7 days)
-        whereClause = `alarmstate = 2 AND lastdowntime <= '${complete_date}'`;
+      case FAULT_CODES.GPL: // GPL
+        whereClause = `alarmstate = ${FAULT_CODES.GPL}`;
         break;
-      case 3: // GPL
-        whereClause = "alarmstate = 3";
+      case DERIVED_FAULT_CODES.LOP_MINOR: // LOP Minor
+        whereClause = `alarmstate = ${FAULT_CODES.LOP} AND LOWER(perceived_severity) <> 'warning'`;
         break;
-      case "4": // LOP Minor
-        whereClause = "alarmstate = 4 AND LOWER(perceived_severity) <> 'warning'";
-        break;
-      case "4_warning": // LOP Warning
-        whereClause = "alarmstate = 4 AND LOWER(perceived_severity) = 'warning'";
+      case DERIVED_FAULT_CODES.LOP_WARNING: // LOP Warning
+        whereClause = `alarmstate = ${FAULT_CODES.LOP} AND LOWER(perceived_severity) = 'warning'`;
         break;
       default:
         whereClause = "1=1";
@@ -72,17 +68,17 @@ export default function RegionStats({
 
   // 1. Data Extraction
   const onlineCount = alertCount?.[region]?.Online || 0;
-  
+
   const CriticalFaultData = {
-    linkDownShort: realtimeStats?.[region]?.[2] || 0,
-    linkDownLong: realtimeStats?.[region]?.["2_long"] || 0,
-    lopMinor: realtimeStats?.[region]?.[4] || 0,         // Maps to base alarm state 4 count (Minor)
-    lopWarning: realtimeStats?.[region]?.["4_warning"] || 0, // Maps to warning count
+    linkDownShort: realtimeStats?.[region]?.[FAULT_CODES.LINK_DOWN] || 0,
+    linkDownLong: realtimeStats?.[region]?.[DERIVED_FAULT_CODES.LINK_DOWN_STALE] || 0,
+    lopMinor: realtimeStats?.[region]?.[FAULT_CODES.LOP] || 0,
+    lopWarning: realtimeStats?.[region]?.[DERIVED_FAULT_CODES.LOP_WARNING] || 0,
   };
 
   const OtherFaultData = {
-    powerOff: realtimeStats?.[region]?.[1] || 0,
-    gpl: realtimeStats?.[region]?.[3] || 0,
+    powerOff: realtimeStats?.[region]?.[FAULT_CODES.POWER_OFF] || 0,
+    gpl: realtimeStats?.[region]?.[FAULT_CODES.GPL] || 0,
   }
 
   const totalCriticalFaults = Object.values(CriticalFaultData).reduce((a, b) => a + b, 0);
@@ -95,15 +91,15 @@ export default function RegionStats({
 
   const otherFaultsKafka = (alertCount?.[region]?.['Power Off'] || 0) +
                            (alertCount?.[region]?.['GEM Packet Loss'] || 0);
-  
+
   const totalAssets = onlineKafka + criticalFaultsKafka + otherFaultsKafka;
   const healthPercentage = totalAssets > 0 ? ((onlineKafka / totalAssets) * 100).toFixed(1) : 0;
 
   // Helper to determine item style based on selection
   const getHighlightStyle = (faultType) => {
     if (!selectedFault) return "transition-all duration-300 opacity-100 cursor-pointer";
-    return selectedFault === faultType 
-      ? "transition-all duration-300 opacity-100 scale-[1.02] z-10 bg-[var(--calcite-ui-foreground-2)] cursor-pointer" 
+    return selectedFault === faultType
+      ? "transition-all duration-300 opacity-100 scale-[1.02] z-10 bg-[var(--calcite-ui-foreground-2)] cursor-pointer"
       : "transition-all duration-300 opacity-30 grayscale-[0.5] blur-[0.5px] pointer-events-none cursor-default";
   };
 
@@ -125,8 +121,8 @@ export default function RegionStats({
       {/* SECTION C: CRITICAL FAULTS */}
       <CalciteBlock scale="s" heading={`Critical Faults (${totalCriticalFaults.toLocaleString()})`} open collapsible>
         <CalciteIcon slot="icon" icon="exclamation-mark-triangle" style={{'--calcite-ui-icon-color': 'red'}} />
-        
-        {totalCriticalFaults === 0 ? 
+
+        {totalCriticalFaults === 0 ?
           <CalciteProgress type="indeterminate" label="Calculating critical faults..." text="No critical faults detected. Monitoring..." />
           : null
         }
@@ -142,8 +138,8 @@ export default function RegionStats({
             {/* Link Down New */}
             {CriticalFaultData.linkDownShort > 0 && (
               <CalciteListItem
-                className={getHighlightStyle('2_stale')}
-                onClick={() => handleFaultClick('2_stale')}
+                className={getHighlightStyle(DERIVED_FAULT_CODES.LINK_DOWN_RECENT)}
+                onClick={() => handleFaultClick(DERIVED_FAULT_CODES.LINK_DOWN_RECENT)}
                 label="Linked Down < 7 Days"
                 description="The OLT cannot receive expected optical signals from ONT"
               >
@@ -156,8 +152,8 @@ export default function RegionStats({
             {/* Link Down Stale */}
             {CriticalFaultData.linkDownLong > 0 && (
               <CalciteListItem
-                className={getHighlightStyle('2_long')}
-                onClick={() => handleFaultClick('2_long')}
+                className={getHighlightStyle(DERIVED_FAULT_CODES.LINK_DOWN_STALE)}
+                onClick={() => handleFaultClick(DERIVED_FAULT_CODES.LINK_DOWN_STALE)}
                 label="Linked Down > 7 Days"
                 description="The OLT cannot receive expected optical signals from ONT"
               >
@@ -170,8 +166,8 @@ export default function RegionStats({
             {/* LOP Minor */}
             {CriticalFaultData.lopMinor > 0 && (
               <CalciteListItem
-                className={getHighlightStyle('4')}
-                onClick={() => handleFaultClick('4')}
+                className={getHighlightStyle(DERIVED_FAULT_CODES.LOP_MINOR)}
+                onClick={() => handleFaultClick(DERIVED_FAULT_CODES.LOP_MINOR)}
                 label="Low Optical Power"
                 description="Remote optical transceiver parameters exceed alarm threshold"
               >
@@ -184,8 +180,8 @@ export default function RegionStats({
             {/* LOP Warning */}
             {CriticalFaultData.lopWarning > 0 && (
               <CalciteListItem
-                className={getHighlightStyle('4_warning')}
-                onClick={() => handleFaultClick('4_warning')}
+                className={getHighlightStyle(DERIVED_FAULT_CODES.LOP_WARNING)}
+                onClick={() => handleFaultClick(DERIVED_FAULT_CODES.LOP_WARNING)}
                 label="Low Optical Power (Warning)"
                 description="Remote optical transceiver parameters exceed warning threshold"
               >
@@ -201,8 +197,8 @@ export default function RegionStats({
       {/* SECTION D: OTHER FAULTS */}
       <CalciteBlock scale="s" heading={`Other Faults (${totalOtherFaults.toLocaleString()})`} open collapsible>
         <CalciteIcon slot="icon" icon="exclamation-mark-triangle" style={{'--calcite-ui-icon-color': 'yellow'}} />
-        
-        {totalOtherFaults === 0 ? 
+
+        {totalOtherFaults === 0 ?
           <CalciteProgress type="indeterminate" label="Calculating other faults..." text="No other faults detected. Monitoring..." />
           : null
         }
@@ -218,8 +214,8 @@ export default function RegionStats({
             {/* Power Off */}
             {OtherFaultData.powerOff > 0 && (
               <CalciteListItem
-                className={getHighlightStyle(1)}
-                onClick={() => handleFaultClick(1)}
+                className={getHighlightStyle(FAULT_CODES.POWER_OFF)}
+                onClick={() => handleFaultClick(FAULT_CODES.POWER_OFF)}
                 label="Power Off"
                 description="The dying-gasp of GPON ONT (DGi) is generated"
               >
@@ -232,8 +228,8 @@ export default function RegionStats({
             {/* GPL */}
             {OtherFaultData.gpl > 0 && (
               <CalciteListItem
-                className={getHighlightStyle(3)}
-                onClick={() => handleFaultClick(3)}
+                className={getHighlightStyle(FAULT_CODES.GPL)}
+                onClick={() => handleFaultClick(FAULT_CODES.GPL)}
                 label="GEM Packet Loss"
                 description="The loss of GEM channel delineation (LCDGi) occurs"
               >

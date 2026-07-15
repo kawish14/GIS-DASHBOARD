@@ -9,7 +9,6 @@ import {
   CalciteNotice,
   CalciteAction,
 } from "@esri/calcite-components-react";
-import { useArcGIS } from "../../../context/MapContext";
 
 export default function LonghaulStyle({ feature }) {
   const attr = feature.attributes;

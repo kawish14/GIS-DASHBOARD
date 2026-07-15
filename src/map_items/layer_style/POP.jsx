@@ -1,24 +1,14 @@
 import { useEffect } from "react";
 import { useArcGIS } from '../../context/MapContext';
+import SymbologyLayer from "../symbology/SymbologyLayer";
 
 export default function POP() {
+
   const { layers, view } = useArcGIS();
 
   useEffect(() => {
 
     if (Object.keys(layers).length === 0 || !layers.pop) return; 
-
-    var symbol = {
-        type: "picture-marker",
-        url: "images/pins/default.png",
-        width: "20px",
-        height: "20px",
-      };
-
-    const rendererCheck = {
-        type: "simple",
-        symbol: symbol,
-      };
 
     const popLabelClass = {
       symbol: {
@@ -39,10 +29,7 @@ export default function POP() {
       }
     };
 
-    layers.pop.selection = false
-    layers.pop.visible = true
-    layers.pop.renderer = rendererCheck;
-
+    layers.pop.selection = false;
     layers.pop.labelingInfo = [popLabelClass];
     layers.pop.labelsVisible = false; // Keep default false, let the user toggle it
 
@@ -51,10 +38,8 @@ export default function POP() {
       view.map.add(layers.pop);
 
     }
-    
 
+  }, [layers.pop, view]);
 
-  }, [layers.pop, view]); // Added dependencies for stability
-
-  return null;
+  return <SymbologyLayer layerKey="pop" defaultVisible={false} />;
 }

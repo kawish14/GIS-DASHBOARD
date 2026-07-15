@@ -6,19 +6,22 @@ import {
   CalciteDropdownItem,
 } from "@esri/calcite-components-react";
 import { useAuth } from "../../context/AuthContext";
-import { useArcGIS } from "../../context/MapContext";
+import { useMapView, useLayers, useStats } from "../../context/MapContext";
 import logo from "../../assets/images/TesLogo.png";
 import SearchWidget from "../../map_items/widgets/SearchWidget";
 import FeatureGuard from "../auth/FeatureGuard";
+import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS, createEmptyRegionStats } from "../../constants/faultCodes";
 
 export default function TopBar() {
   const { user, logout } = useAuth();
-  const { view, layers, setRealtimeStats } = useArcGIS();
+  const { view } = useMapView();
+  const { layers } = useLayers();
+  const { setRealtimeStats } = useStats();
 
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFaults, setSelectedFaults] = useState(["2", "3", "4"]);
   const faultDropdownRef = useRef();
-  
+
   // State and ref for the custom profile dropdown
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const profileRef = useRef(null);
@@ -36,11 +39,13 @@ export default function TopBar() {
     };
   }, []);
 
+  const customerLayer = layers.Customers_test;
+
   useEffect(() => {
-    if (!view || !layers.Customers_test || !user) return;
+    if (!view || !customerLayer || !user) return;
 
     const handleSelect = (event) => {
-        const selectedValues = event 
+        const selectedValues = event
             ? Array.from(event.target.selectedItems).map(item => item.accessKey || item.getAttribute("accessKey"))
             : selectedFaults;
 
@@ -52,22 +57,22 @@ export default function TopBar() {
 
         let faultQuery = "";
         if (selectedValues.length === 0) {
-            faultQuery = "alarmstate IN (1, 2, 3, 4)";
+            faultQuery = `alarmstate IN (${FAULT_CODES.POWER_OFF}, ${FAULT_CODES.LINK_DOWN}, ${FAULT_CODES.GPL}, ${FAULT_CODES.LOP})`;
         } else {
             const joinedValues = selectedValues.join(",");
             faultQuery = `alarmstate IN (${joinedValues})`;
         }
 
         const finalCql = `${regionQuery} AND ${faultQuery}`;
-        
-        layers.Customers_test.customParameters.CQL_FILTER = finalCql;
-        layers.Customers_test.refresh();
 
-        view.whenLayerView(layers.Customers_test).then((layerView) => {
+        customerLayer.customParameters.CQL_FILTER = finalCql;
+        customerLayer.refresh();
+
+        view.whenLayerView(customerLayer).then((layerView) => {
             const watcher = layerView.watch("updating", async (val) => {
                 if (!val) {
                     watcher.remove();
-                    await refreshStatsAfterFilter(layers.Customers_test);
+                    await refreshStatsAfterFilter(customerLayer);
                     setIsLoading(false);
                 }
             });
@@ -86,40 +91,54 @@ export default function TopBar() {
             dropdown.removeEventListener("calciteDropdownSelect", handleSelect);
         }
     };
-  }, [view, layers, user]);
+    // BUG FIX: depend on `customerLayer` (layers.Customers_test) specifically,
+    // not the whole `layers` object. `layers` gets a new identity every time
+    // ANY layer registers (Vehicles, dc_odb, Feeder, ...), which previously
+    // re-ran this effect -- and therefore re-queried and refreshed the
+    // customer layer -- on every unrelated layer mount.
+  }, [view, customerLayer, user]);
 
   const refreshStatsAfterFilter = async (layer) => {
     try {
       const layerView = await view.whenLayerView(layer);
-      
+
       const date = new Date();
-      date.setDate(date.getDate() - 7);
-      const sevenDaysAgo = date.getTime();
+      date.setDate(date.getDate() - STALE_FAULT_WINDOW_DAYS);
+      const staleThreshold = date.getTime();
 
       const query = layerView.createQuery();
-      query.where = "alarmstate IN (1, 2, 3, 4)";
-      query.outFields = ["*"];
-      
+      query.where = `alarmstate IN (${FAULT_CODES.POWER_OFF}, ${FAULT_CODES.LINK_DOWN}, ${FAULT_CODES.GPL}, ${FAULT_CODES.LOP})`;
+      query.outFields = ["region", "alarmstate", "lastdowntime", "perceived_severity"];
+
       const results = await layerView.queryFeatures(query);
 
-      const newStats = {
-        North: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0 },
-        South: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0 },
-        Central: { 1: 0, 2: 0, "2_long": 0, 3: 0, 4: 0 }
-      };
+      const newStats = createEmptyRegionStats();
 
       results.features.forEach((feature) => {
         const region = feature.attributes.region;
         const state = feature.attributes.alarmstate;
         const lastDownTime = feature.attributes.lastdowntime;
+        const severity = feature.attributes.perceived_severity;
 
         if (newStats[region]) {
-          if (state === 2) {
+          if (state === FAULT_CODES.LINK_DOWN) {
             const recordTime = new Date(lastDownTime).getTime();
-            if (recordTime <= sevenDaysAgo) {
-              newStats[region]["2_long"]++;
+            if (recordTime <= staleThreshold) {
+              newStats[region][DERIVED_FAULT_CODES.LINK_DOWN_STALE]++;
             } else {
-              newStats[region][2]++;
+              newStats[region][state]++;
+            }
+          } else if (state === FAULT_CODES.LOP) {
+            // BUG FIX: this branch was missing entirely, so every LOP fault
+            // (warning or not) fell through to the generic `else` below,
+            // which only ever incremented `newStats[region][4]` and never
+            // `"4_warning"` -- silently dropping the warning/minor split
+            // that Realtime.jsx tracks. That mismatch in shape is what
+            // caused every region tab to blink together (see faultCodes.js).
+            if (severity && severity.toString().toLowerCase() === "warning") {
+              newStats[region][DERIVED_FAULT_CODES.LOP_WARNING]++;
+            } else {
+              newStats[region][state]++;
             }
           } else {
              if (newStats[region][state] !== undefined) {
@@ -128,15 +147,14 @@ export default function TopBar() {
           }
         }
       });
-      
+
       setRealtimeStats(newStats);
     } catch (err) {
       console.error("Error refreshing stats after filter:", err);
     }
   };
 
-  const isLayerReady = layers && layers.Customers_test;
-
+  const isLayerReady = Boolean(customerLayer);
 
   return (
     <calcite-navigation slot="header" className="border-b border-slate-700">
@@ -146,13 +164,13 @@ export default function TopBar() {
       </div>
 
       <calcite-menu slot="content-end" className="flex items-center pr-6 gap-2">
-        
+
         <FeatureGuard featureKey="SearchWidget">
-          <div className="flex items-center mr-2"> 
+          <div className="flex items-center mr-2">
             <SearchWidget />
           </div>
         </FeatureGuard>
-        
+
         <FeatureGuard featureKey="tab_CustomerDropDwon">
           <CalciteDropdown ref={faultDropdownRef} width="s" disabled={isLoading ? true : undefined} close-on-select="false" className="mr-4">
             <CalciteButton slot="trigger" appearance="outline" icon-end="caret-down" icon-start="filter" loading={isLoading ? true : undefined}>
@@ -170,23 +188,16 @@ export default function TopBar() {
 
         {/* Custom Notifications & User Profile Section */}
         <div className="flex items-center gap-4 profile-notification">
-          
-          {/* Notification Bell with Dark Theme hover */}
-         {/*  <button className="text-slate-400 hover:text-white transition-colors pt-1 hover:bg-slate-700 p-1 rounded-full">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
-            </svg>
-          </button> */}
 
           {/* Profile Dropdown */}
           <div className="relative" ref={profileRef}>
-            
+
             {/* 2. Avatar Trigger matched to #334155 (bg-slate-700) */}
-            <div 
+            <div
               className="cursor-pointer"
               onClick={() => setIsProfileOpen(!isProfileOpen)}
             >
-              <calcite-avatar 
+              <calcite-avatar
                 full-name= {user.full_name}
                 scale="m"
               />
@@ -195,7 +206,7 @@ export default function TopBar() {
             {/* 3. Dropdown Card matched to Dark Theme */}
             {isProfileOpen && (
               <div className="absolute right-0 mt-3 w-64 bg-[#2b2b2b] rounded-lg shadow-2xl border border-slate-700 z-[9999] flex flex-col overflow-hidden">
-                
+
                 {/* Header Profile Info - Slightly darker bg for separation */}
                 <div className="flex items-center p-4">
                   <calcite-icon icon="user" />
@@ -207,14 +218,11 @@ export default function TopBar() {
 
                 {/* Dropdown Links */}
                 <div className="py-2 bg-[#2b2b2b]">
-                  {/* <button className="w-full text-left px-5 py-2.5 text-[13px] text-slate-300 hover:bg-slate-700 hover:text-white transition-colors">
-                    Account overview
-                  </button> */}
-                  <button 
+                  <button
                     onClick={() => {
                       setIsProfileOpen(false);
                       logout();
-                    }} 
+                    }}
                     className="w-full text-left px-5 py-2.5 text-[13px] text-red-400 hover:bg-slate-700 hover:text-red-300 transition-colors border-t border-slate-700 mt-1"
                   >
                     Sign Out

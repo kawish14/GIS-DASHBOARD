@@ -4,32 +4,32 @@ import MapViews from "../components/center/MapView";
 import RightSidebar from "../components/right/RightSidebar";
 import LeftSidebar from "../components/left/LeftSidebar";
 import FeatureTable from "../components/bottom/FeatureTable";
-import { useAuth } from "../context/AuthContext";
-import { useArcGIS } from "../context/MapContext";
-import { 
-  CalciteTabs, 
-  CalciteTabNav, 
-  CalciteTabTitle, 
+import { useLayers, useMapView, usePopup } from "../context/MapContext";
+import {
+  CalciteTabs,
+  CalciteTabNav,
+  CalciteTabTitle,
   CalciteTab,
   CalciteIcon,
   CalciteShell
 } from "@esri/calcite-components-react";
 
 function Dashboard() {
-  const { user } = useAuth();
-  const { layers, view, setCustomerLayerView, selectedFeatures, setSelectedFeatures } = useArcGIS();
+  const { layers, setCustomerLayerView } = useLayers();
+  const { view } = useMapView();
+  const { selectedFeatures, setSelectedFeatures } = usePopup();
   const [isLoading, setIsLoading] = useState(true);
 
-
-  // Just collapsing it for brevity in this snippet
   const MAX_WAIT_MS = 5000;
   const CHECK_INTERVAL_MS = 200;
-  let elapsedTime = 0;
-  let watcherHandle = null;
 
   useEffect(() => {
     if (!view) return;
     setIsLoading(true);
+
+    let elapsedTime = 0;
+    let watcherHandle = null;
+
     const intervalId = setInterval(() => {
       if (layers.Customers_test) {
         clearInterval(intervalId);
@@ -46,8 +46,13 @@ function Dashboard() {
       elapsedTime += CHECK_INTERVAL_MS;
       if (elapsedTime >= MAX_WAIT_MS) { clearInterval(intervalId); setIsLoading(false); }
     }, CHECK_INTERVAL_MS);
+
     return () => { clearInterval(intervalId); if (watcherHandle) watcherHandle.remove(); };
-  }, [view, layers]);
+    // Depend on the specific layer key rather than the whole `layers` object
+    // -- `layers` gets a new reference every time ANY layer registers
+    // (Vehicles, dc_odb, Feeder, ...), which would otherwise restart this
+    // polling loop for unrelated layer mounts.
+  }, [view, layers.Customers_test]);
 
   return (
     <CalciteShell
@@ -57,23 +62,31 @@ function Dashboard() {
       }}
     >
       <TopBar slot="header" /> {/* Ensure TopBar is in header slot if applicable, otherwise default flow */}
-      
+
       {/* Assuming Sidebars are Calcite Panels or correctly positioned via CSS */}
-      <LeftSidebar /> 
+      <LeftSidebar />
       <RightSidebar />
 
-      {/* CENTER CONTENT AREA 
+      {/* CENTER CONTENT AREA
          This flex container becomes the "main" content of the shell.
          It holds the Map and the Table vertically.
       */}
 
-      <div 
-        style={{ 
-            display: "flex", 
-            flexDirection: "column", 
-            height: "100%", 
+      <div
+        style={{
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
             width: "100%",
-            overflow: "hidden"
+            overflow: "hidden",
+            transition: "width 300ms ease-in-out",
+            // CSS containment: tells the browser this subtree's layout/paint
+            // is self-contained, so it doesn't need to be recomputed when a
+            // sibling (LeftSidebar / RightSidebar's CalciteShellPanel)
+            // resizes, and its own resizing doesn't ripple back out either.
+            // This is what stops one panel's open/close transition from
+            // visually disturbing its sibling.
+            contain: "layout style",
         }}
       >
         {/* Map takes all available space initially */}
@@ -82,8 +95,8 @@ function Dashboard() {
         {/* Table takes fixed space when visible, pushing map up */}
         {selectedFeatures.length > 0 && (
             <div style={{ flex: "0 0 auto", height: "auto", maxHeight: "40%" }}>
-                <FeatureTable 
-                    features={selectedFeatures} 
+                <FeatureTable
+                    features={selectedFeatures}
                 />
             </div>
         )}

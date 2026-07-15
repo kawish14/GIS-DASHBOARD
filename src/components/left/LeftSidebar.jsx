@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import {
   CalciteShellPanel,
   CalcitePanel,
@@ -12,7 +12,7 @@ import {
 } from "@esri/calcite-components-react";
 import RegionStats from "./RegionStats";
 import ActiveUsers from "./ActiveUsers";
-import { useArcGIS } from "../../context/MapContext";
+import { useStats, useMapView } from "../../context/MapContext";
 import { useAuth } from "../../context/AuthContext";
 
 import FeatureGuard from "../auth/FeatureGuard";
@@ -23,10 +23,26 @@ const ACTIONS = [
   { text: "Active Users", icon: "users", featureKey: "tab_Active_Users" }
 ];
 
+const REGION_COORDINATES = {
+  North: { target: [73.088438, 33.605487], zoom: 11 },
+  South: { target: [67.050987, 24.842437], zoom: 11 },
+  Central: { target: [74.385495, 31.479528], zoom: 11 },
+};
+
 export default function LeftSidebar() {
   const { user, hasPermission } = useAuth();
-  const { alertCount, realtimeStats, view } = useArcGIS();
-  const REGIONS = user.permissions.regions;
+  // Only subscribes to stats + view, so a change to `layers` or `popupFeature`
+  // elsewhere in the app no longer re-renders this component.
+  const { alertCount, realtimeStats } = useStats();
+  const { view } = useMapView();
+
+  // Guarded: user/permissions can briefly be null while the session check
+  // is still in flight, or after logout.
+  // We use useMemo and localeCompare to create an A-Z sorted copy of the regions.
+  const REGIONS = useMemo(() => {
+    const userRegions = user?.permissions?.regions ?? [];
+    return [...userRegions].sort((a, b) => a.localeCompare(b));
+  }, [user?.permissions?.regions]);
 
   // Dynamically filter available actions based on user permissions
   const permittedActions = useMemo(() => {
@@ -41,14 +57,20 @@ export default function LeftSidebar() {
   const [tab, setTab] = useState(REGIONS.length > 0 ? REGIONS[0] : null);
   const [highlightedRegions, setHighlightedRegions] = useState({});
   const [selectedFault, setSelectedFault] = useState(null);
-  
-  const prevStatsRef = useRef({});
 
-  const coordinates = {
-    North: { target: [73.088438, 33.605487], zoom: 11 },
-    South: { target: [67.050987, 24.842437], zoom: 11 },
-    Central: { target: [74.385495, 31.479528], zoom: 11 },
-  };
+  const prevStatsRef = useRef({});
+  // Reference to THIS panel's own DOM node. calcitePanelClose is a real DOM
+  // CustomEvent that bubbles by default, and since both the left and right
+  // CalcitePanel live inside the same CalciteShell, an event fired by one
+  // panel can end up observed by a listener meant for the other. Checking
+  // `event.target === panelRef.current` guarantees this handler only acts
+  // on a close event that actually originated from THIS panel.
+  const panelRef = useRef(null);
+
+  const handlePanelClose = useCallback((e) => {
+    if (e?.target && panelRef.current && e.target !== panelRef.current) return;
+    setIsCollapsed(true);
+  }, []);
 
   useEffect(() => {
     if (!realtimeStats) return;
@@ -68,18 +90,20 @@ export default function LeftSidebar() {
 
     if (hasAnyChange) {
       setHighlightedRegions(changes);
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         setHighlightedRegions({});
       }, 1000);
+      // Avoid leaking the timeout if realtimeStats changes again before it fires.
+      return () => clearTimeout(timeoutId);
     }
 
     prevStatsRef.current = realtimeStats;
-  }, [realtimeStats, REGIONS]); 
+  }, [realtimeStats, REGIONS]);
 
   const handleTabChange = (e) => {
-    const region = e.target.accessKey; 
+    const region = e.target.accessKey;
     setTab(region);
-    if (view && coordinates[region]) view.goTo(coordinates[region]);
+    if (view && REGION_COORDINATES[region]) view.goTo(REGION_COORDINATES[region]);
   };
 
   const handleActionClick = (toolName) => {
@@ -95,12 +119,13 @@ export default function LeftSidebar() {
   if (!realtimeStats || permittedActions.length === 0) return null;
 
   return (
-    <CalciteShellPanel 
-      slot="panel-start" 
-      position="start" 
+    <CalciteShellPanel
+      slot="panel-start"
+      position="start"
       id="shell-panel-start"
-      collapsed={isCollapsed} 
+      collapsed={isCollapsed}
       displayMode="dock"
+      style={{ contain: "layout style", willChange: "width", isolation: "isolate" }}
     >
       <CalciteActionBar slot="action-bar">
         {permittedActions.map((action) => (
@@ -114,8 +139,8 @@ export default function LeftSidebar() {
         ))}
       </CalciteActionBar>
 
-      <CalcitePanel heading={activeTool} closable closed={isCollapsed} onCalcitePanelClose={() => setIsCollapsed(true)}>
-        
+      <CalcitePanel ref={panelRef} heading={activeTool} closable closed={isCollapsed} onCalcitePanelClose={handlePanelClose}>
+
         {/* --- 1. ALARM STATE TAB --- */}
         <FeatureGuard featureKey="tab_Alarm_State">
           <div style={{ display: activeTool === "Alarm State" ? "block" : "none", height: "100%" }}>
@@ -146,9 +171,9 @@ export default function LeftSidebar() {
                       <CalciteLoader label="Loading Alerts" active scale="s" />
                     </div>
                   ) : (
-                    <RegionStats 
-                      region={region} 
-                      alertCount={alertCount} 
+                    <RegionStats
+                      region={region}
+                      alertCount={alertCount}
                       realtimeStats={realtimeStats}
                       selectedFault={selectedFault}
                       setSelectedFault={setSelectedFault}
