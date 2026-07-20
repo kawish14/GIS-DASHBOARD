@@ -84,7 +84,7 @@ const AVAILABLE_FEATURES = [
   {key:"tool_CustomerFilter", label:"Customer Fault Filter", group:"Right Sidebar Tab", tab:"tab_Filter"},
   {key:"tool_CustomerInactiveFilter", label:"Inactive Customer Filter", group:"Right Sidebar Tab", tab:"tab_Filter"},
   {key:"tool_OLT_Customer", label:"OLT Filter", group:"Right Sidebar Tab", tab:"tab_Filter"},
-
+  {key:"tool_FaultAnalytics", label:"Fault Analytics", group:"Right Sidebar Tab", tab:"tab_Filter"},
   {key:"tab_AIChat", label:"AI Chat Tab", group:"Right Sidebar Tab" } // <-- NEW AI CHAT TAB
 ];
 

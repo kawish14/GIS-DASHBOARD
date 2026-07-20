@@ -22,7 +22,8 @@ export default function CoordinateWidget() {
       const scale = Math.round(view.scale);
       const zoom = view.zoom.toFixed(0); 
 
-      coordsWidget.current.innerHTML = `Lat/Lon ${lat} ${lon} | Scale 1:${scale} | Zoom ${zoom}`;
+      // FIX: Use textContent instead of innerHTML to prevent childList MutationObserver spam
+      coordsWidget.current.textContent = `Lat/Lon ${lat} ${lon} | Scale 1:${scale} | Zoom ${zoom}`;
     };
 
     // 3. Store handles for cleanup

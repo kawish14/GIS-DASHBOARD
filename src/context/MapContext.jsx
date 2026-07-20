@@ -128,23 +128,134 @@ export function useStats() {
 const PopupContext = createContext(null);
 
 function PopupProvider({ children, view }) {
-  const [popupFeature, setPopupFeature] = useState(null);
+  // Multi-selection "identify" stack: [{ id, feature, layerTitle, label, highlightHandle }]
+  // A raw map click starts a fresh stack (startNewSelection); a link clicked
+  // *inside* an already-open popup (Customer -> DC -> POP) appends to the
+  // existing stack (pushSelection) instead of replacing it. Each entry owns
+  // its own ArcGIS highlight handle, so earlier tabs stay highlighted on the
+  // map while later ones are opened.
+  const [selectionStack, setSelectionStack] = useState([]);
+  const [activeSelectionId, setActiveSelectionId] = useState(null);
+
   const [parcelFeature, setParcelFeature] = useState(null);
   const [selectedFeatures, setSelectedFeatures] = useState([]);
+  // Ephemeral, non-tab highlight -- e.g. DcDetails highlighting every
+  // customer under a clicked splitter. Independent of the tab highlights
+  // above, so it never clears/is-cleared-by them.
   const highlightHandleRef = useRef(null);
+  const idCounter = useRef(0);
+
+  // A genuinely new top-level lookup (raw map click on a new feature).
+  // Tears down every existing tab and its highlight, then starts over.
+  const startNewSelection = useCallback((feature, opts = {}) => {
+    setSelectionStack(prev => {
+      prev.forEach(entry => entry.highlightHandle?.remove());
+      return [];
+    });
+    idCounter.current += 1;
+    const entry = {
+      id: idCounter.current,
+      feature,
+      layerTitle: feature?.layer?.title,
+      label: opts.label || feature?.layer?.title,
+      highlightHandle: null,
+    };
+    setSelectionStack([entry]);
+    setActiveSelectionId(entry.id);
+    return entry.id;
+  }, []);
+
+  // A nested lookup triggered from inside an already-open popup (e.g. the
+  // "DC / ODB" link on a customer, or the "POP" link on a DC). Appends a
+  // new tab without disturbing any earlier ones.
+  const pushSelection = useCallback((feature, opts = {}) => {
+    idCounter.current += 1;
+    const entry = {
+      id: idCounter.current,
+      feature,
+      layerTitle: feature?.layer?.title,
+      label: opts.label || feature?.layer?.title,
+      highlightHandle: null,
+    };
+    setSelectionStack(prev => [...prev, entry]);
+    setActiveSelectionId(entry.id);
+    return entry.id;
+  }, []);
+
+  const setEntryHighlight = useCallback((id, handle) => {
+    setSelectionStack(prev => prev.map(e => (e.id === id ? { ...e, highlightHandle: handle } : e)));
+  }, []);
+
+  // Patches an existing tab's feature in place (e.g. swapping a thin
+  // click-result graphic for the fully-attributed one fetched right after).
+  // Does NOT touch the highlight or open a new tab.
+  const updateSelectionFeature = useCallback((id, feature) => {
+    setSelectionStack(prev => prev.map(e => (
+      e.id === id ? { ...e, feature, layerTitle: feature?.layer?.title ?? e.layerTitle } : e
+    )));
+  }, []);
+
+  // Closes a single tab (e.g. the user hits the "x" on it), removing just
+  // that tab's highlight and re-activating the tab behind it, if any.
+  const closeSelection = useCallback((id) => {
+    setSelectionStack(prev => {
+      const target = prev.find(e => e.id === id);
+      target?.highlightHandle?.remove();
+      const next = prev.filter(e => e.id !== id);
+      setActiveSelectionId(current => (
+        current !== id ? current : (next.length ? next[next.length - 1].id : null)
+      ));
+      return next;
+    });
+  }, []);
+
+  const clearAllSelections = useCallback(() => {
+    setSelectionStack(prev => {
+      prev.forEach(entry => entry.highlightHandle?.remove());
+      return [];
+    });
+    setActiveSelectionId(null);
+  }, []);
 
   useEffect(() => {
     if (!view) {
-      setPopupFeature(null);
+      clearAllSelections();
     }
-  }, [view]);
+  }, [view, clearAllSelections]);
+
+  const activeSelection = selectionStack.find(e => e.id === activeSelectionId) || null;
+
+  // --- Back-compat shim ---------------------------------------------------
+  // Existing detail components (DcDetails, PopDetails, ...) read
+  // `popupFeature` off usePopup(). Rather than rewrite every consumer in
+  // one shot, popupFeature keeps working: it resolves to the *active* tab's
+  // feature. A plain `setPopupFeature(x)` call is treated as "this is a
+  // brand-new top-level click" (same as startNewSelection); anything that
+  // should append to the stack instead must call `pushSelection` directly.
+  const popupFeature = activeSelection?.feature ?? null;
+  const setPopupFeature = useCallback((feature) => {
+    if (feature === null) {
+      clearAllSelections();
+      return;
+    }
+    startNewSelection(feature);
+  }, [startNewSelection, clearAllSelections]);
 
   const value = useMemo(() => ({
+    selectionStack, activeSelectionId, activeSelection, setActiveSelectionId,
+    startNewSelection, pushSelection, closeSelection, clearAllSelections,
+    setEntryHighlight, updateSelectionFeature,
     popupFeature, setPopupFeature,
     parcelFeature, setParcelFeature,
     selectedFeatures, setSelectedFeatures,
     highlightHandleRef,
-  }), [popupFeature, parcelFeature, selectedFeatures]);
+  }), [
+    selectionStack, activeSelectionId, activeSelection,
+    startNewSelection, pushSelection, closeSelection, clearAllSelections,
+    setEntryHighlight, updateSelectionFeature,
+    popupFeature, setPopupFeature,
+    parcelFeature, selectedFeatures,
+  ]);
 
   return <PopupContext.Provider value={value}>{children}</PopupContext.Provider>;
 }

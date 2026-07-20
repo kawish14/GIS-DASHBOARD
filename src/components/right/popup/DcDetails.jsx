@@ -78,7 +78,7 @@ const MetricItem = ({ label, count, color, total, onClick, isActive }) => {
 export default function DcDetail({ feature }) {
   const { view } = useMapView();
   const { layers, layerView } = useLayers();
-  const { setPopupFeature, popupFeature, setSelectedFeatures, highlightHandleRef } = usePopup();
+  const { pushSelection, popupFeature, setSelectedFeatures, highlightHandleRef } = usePopup();
   const attr = feature.attributes;
 
   const [chartData, setChartData] = useState([]);
@@ -196,7 +196,7 @@ export default function DcDetail({ feature }) {
             const popFeature = results.features[0];
             popFeature.layer = popLayer; 
             view.goTo({ target: popFeature, zoom: 18 });
-            setPopupFeature(popFeature);
+            pushSelection(popFeature, { label: "POP" });
         }
     } catch (err) { console.error("Error finding POP:", err); }
   };

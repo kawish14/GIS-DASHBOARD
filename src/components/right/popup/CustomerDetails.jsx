@@ -14,6 +14,47 @@ import { api } from "../../../../url";
 import { useMapView, useLayers, usePopup } from "../../../context/MapContext";
 import { escapeForCql } from "../../../constants/faultCodes";
 
+// --- Color / Threshold Config ---
+const NATIVE = {
+  divider: "#e0e0e0",
+  label: "#efecec",
+  heading: "#efecec",
+  nan: "#9e9e9e",
+  alarm: "#df181f", // Esri "red" used in default popup charts/alerts
+  warn: "#ff8c00", // Esri "orange"
+  ok: "#08d812", // Esri "green"
+};
+
+// Surface tokens for the dashboard chrome (backgrounds, borders, body text).
+// Set to the light/white card design. NOTE: severity colors
+// (NATIVE.alarm/warn/ok) are unaffected by this -- only chrome/background/
+// text tokens live here.
+const SURFACE = {
+  panelBg: "linear-gradient(180deg, #2b2b2b, #2b2b2b, 100%)",
+  cardBg: "#2b2b2b",
+  border: NATIVE.divider,
+  label: NATIVE.label,
+  heading: NATIVE.heading,
+  shadow: "0 1px 2px rgba(0,0,0,0.04)",
+};
+
+// Real device alarm/warning thresholds (from ONU optical module spec)
+const THRESHOLDS = {
+  temp: { alarmLow: -10, alarmHigh: 100, warnLow: 0, warnHigh: 70 },
+  bias: { alarmLow: 0, alarmHigh: 70, warnLow: 1, warnHigh: 30 },
+  tx: { alarmLow: -1, alarmHigh: 7, warnLow: 0, warnHigh: 6 },
+  rx: { alarmLow: -27, alarmHigh: -6, warnLow: -26, warnHigh: -8 },
+  voltage: { alarmLow: 2.97, alarmHigh: 3.63, warnLow: 3.14, warnHigh: 3.47 },
+};
+
+// Returns the appropriate status color for a numeric metric given its thresholds
+function severityColor(value, t) {
+  if (isNaN(value)) return NATIVE.nan;
+  if (value <= t.alarmLow || value >= t.alarmHigh) return NATIVE.alarm;
+  if (value <= t.warnLow || value >= t.warnHigh) return NATIVE.warn;
+  return NATIVE.ok;
+}
+
 // --- 1. System Status Logic ---
 const getSystemStatus = (alarmstate) => {
   const state = parseInt(alarmstate, 10);
@@ -57,24 +98,31 @@ const getSystemStatus = (alarmstate) => {
 const optical_threshold = (data) => {
   if (!data) return {
     ontText: "---", oltText: "---",
-    ontKind: "neutral", oltKind: "neutral"
+    ontKind: NATIVE.nan, oltKind: NATIVE.nan,
+    txPowerText: "---", txVolText: "---", tempText: "---", biasText: "---",
+    txPowerKind: NATIVE.nan, txVolKind: NATIVE.nan, tempKind: NATIVE.nan, biasKind: NATIVE.nan
   };
 
-  const threshold = -26.0;
   const ontPower = data.opticsrxpower / 100;
   const oltPower = data.opticsrxpowerbyolt / 100;
-
-  const getKind = (power) => {
-    if (isNaN(power)) return "neutral";
-    if (power < threshold || power > 0) return "red";
-    return "green";
-  };
+  const txPower = data.opticstxpower !== undefined ? Number((data.opticstxpower / 100).toFixed(2)) : NaN;
+  const txVol = data.opticstxvol !== undefined ? Number((data.opticstxvol / 1000).toFixed(2)) : NaN;
+  const temp = data.opticstxtemp !== undefined ? Number(data.opticstxtemp) : NaN;
+  const bias = data.opticstxbiascurr !== undefined ? Number(data.opticstxbiascurr) : NaN;
 
   return {
     ontText: isNaN(ontPower) ? "---" : `${ontPower.toFixed(2)} dBm`,
     oltText: isNaN(oltPower) ? "---" : `${oltPower.toFixed(2)} dBm`,
-    ontKind: getKind(ontPower),
-    oltKind: getKind(oltPower)
+    ontKind: severityColor(ontPower, THRESHOLDS.rx),
+    oltKind: severityColor(oltPower, THRESHOLDS.rx),
+    txPowerText: isNaN(txPower) ? "---" : `${txPower.toFixed(2)} dBm`,
+    txVolText: isNaN(txVol) ? "---" : `${txVol.toFixed(2)} V`,
+    tempText: isNaN(temp) ? "---" : `${temp.toFixed(1)} °C`,
+    biasText: isNaN(bias) ? "---" : `${bias.toFixed(2)} mA`,
+    txPowerKind: severityColor(txPower, THRESHOLDS.tx),
+    txVolKind: severityColor(txVol, THRESHOLDS.voltage),
+    tempKind: severityColor(temp, THRESHOLDS.temp),
+    biasKind: severityColor(bias, THRESHOLDS.bias)
   };
 };
 
@@ -119,12 +167,16 @@ const fieldsToDisplay = [
 
   { key: "ontText", label: "Rx Power (ONT)", group: "Signal Performance", highlight: true },
   { key: "oltText", label: "Rx Power (OLT)", group: "Signal Performance", highlight: true },
+  { key: "txPowerText", label: "Tx Power", group: "Signal Performance", highlight: true },
+  { key: "txVolText", label: "Tx Voltage", group: "Signal Performance", highlight: true },
+  { key: "tempText", label: "Tx Temperature", group: "Signal Performance", highlight: true },
+  { key: "biasText", label: "Tx Bias Current", group: "Signal Performance", highlight: true },
 ];
 
 export default function CustomerDetails({ feature }) {
   const { view } = useMapView();
   const { layers } = useLayers();
-  const { setPopupFeature } = usePopup();
+  const { pushSelection } = usePopup();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -171,7 +223,7 @@ export default function CustomerDetails({ feature }) {
             dcFeature.layer = dcLayer;
 
             view.goTo({ target: dcFeature, zoom: 17 });
-            setPopupFeature(dcFeature);
+            pushSelection(dcFeature, { label: "DC" });
             dcLayer.visible = true;
         } else {
             console.warn("DC not found with ID:", dc_id);
@@ -234,13 +286,13 @@ export default function CustomerDetails({ feature }) {
     if (field.highlight) {
        isChip = true;
        icon = "graph-time-series";
-       if (field.key === "ontText") {
-          val = data._powerInfo.ontText;
-          chipColor = data._powerInfo.ontKind;
-       } else {
-          val = data._powerInfo.oltText;
-          chipColor = data._powerInfo.oltKind;
-       }
+       // field.key is the *Text value (e.g. "txPowerText"); its matching
+       // classification lives under the same prefix + "Kind" (e.g. "txPowerKind").
+       // These Kind values are now real hex colors from severityColor(), not
+       // the old "red"/"green"/"neutral" keyword strings.
+       const kindKey = field.key.replace(/Text$/, "Kind");
+       val = data._powerInfo[field.key];
+       chipColor = data._powerInfo[kindKey] ?? NATIVE.nan;
     }
     else if (field.key === "alarminfo") {
         isChip = true;
@@ -337,58 +389,101 @@ export default function CustomerDetails({ feature }) {
   // Must be alarmstate 4 AND have 'warning' string value
   const isWarningSeverity = currentAlarmState === 4 && checkSeverity?.toString().toLowerCase() === "warning";
 
+  // --- Optical Dashboard: pulled straight out of _powerInfo so it can be
+  // rendered as its own strip above the grouped field list, independent of
+  // fieldsToDisplay's Signal Performance group (which is filtered out below
+  // to avoid showing these values twice).
+  const opticalMetrics = data ? [
+    { key: "ontText", label: "Rx Power (ONT)", value: data._powerInfo.ontText, color: data._powerInfo.ontKind },
+    { key: "oltText", label: "Rx Power (OLT)", value: data._powerInfo.oltText, color: data._powerInfo.oltKind },
+    { key: "txPowerText", label: "Tx Power", value: data._powerInfo.txPowerText, color: data._powerInfo.txPowerKind },
+    { key: "txVolText", label: "Tx Voltage", value: data._powerInfo.txVolText, color: data._powerInfo.txVolKind },
+    { key: "tempText", label: "Tx Temperature", value: data._powerInfo.tempText, color: data._powerInfo.tempKind },
+    { key: "biasText", label: "Tx Bias Current", value: data._powerInfo.biasText, color: data._powerInfo.biasKind },
+  ] : [];
+
   return (
     <div
       scale="s"
       style={{
         display: "flex",
         flexDirection: "column",
+        fontFamily: "var(--calcite-sans-family, inherit)",
       }}
     >
-      {/* 1. Pro Header Block */}
-      <CalciteBlock
-        heading={status.label}
-        scale="s"
-        description={`${feature.attributes.fault_time}`}
-        style={{ "--calcite-block-description-text-color": "#a7ff04" }}
-        open
-        collapsible={false}
+      {/* 0. Identity + Optical Dashboard -- always leads, regardless of fetch state */}
+      <div
+        style={{
+          padding: "0.85rem 1rem 1rem",
+          background: SURFACE.panelBg,
+        }}
       >
-        <div slot="icon">
-          <CalciteIcon
-            icon={status.icon}
-            scale="s"
-            style={{ color: `var(--calcite-ui-${status.kind})` }}
-          />
-        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            marginBottom: "0.75rem",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: "0.62rem",
+                fontWeight: 700,
+                letterSpacing: "0.07em",
+                textTransform: "uppercase",
+                color: SURFACE.label,
+              }}
+            >
+              Customer ID
+            </div>
+            <div
+              style={{
+                fontSize: "1rem",
+                fontWeight: 700,
+                fontFamily: "var(--calcite-mono-family, monospace)",
+                color: "var(--calcite-ui-text-2)",
+                lineHeight: 1.3,
+              }}
+            >
+              {feature.attributes.id ?? "N/A"}
+            </div>
+          </div>
 
-        <div slot="control">
-          <span
+          <div
             style={{
               display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              color: status.isUp ? "#41ff07" : "#ff0707",
-              fontSize: "10px",
-              fontWeight: "bold",
-              textTransform: "uppercase",
-              letterSpacing: "0.5px",
-              marginRight:"12px",
-              marginTop:"12px"
+              flexDirection: "column",
+              alignItems: "flex-end",
+              gap: "2px",
+              flexShrink: 0,
             }}
           >
-            {status.isUp ? (
-              <>
-                <CalciteIcon icon="activity-monitor" scale="s" />
-                UP
-              </>
-            ) : (
-              <>
-                <CalciteIcon icon="activity-monitor" scale="s" />
-                DOWN
-              </>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <CalciteIcon
+                icon={status.icon}
+                scale="s"
+                style={{ color: `var(--calcite-ui-${status.kind})` }}
+              />
+              <span
+                style={{
+                  fontSize: "0.66rem",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  color: status.isUp ? NATIVE.ok : NATIVE.alarm,
+                }}
+              >
+                {status.isUp ? "UP" : "DOWN"} · {status.label}
+              </span>
+            </div>
+            {faultTime && (
+              <span style={{ fontSize: "0.62rem", color: SURFACE.label }}>
+                {faultTime}
+              </span>
             )}
-          </span>
+          </div>
         </div>
 
         {/* Duration Notice (Only if Faulty) */}
@@ -399,11 +494,14 @@ export default function CustomerDetails({ feature }) {
             icon="clock"
             open
             width="full"
-            style={{ marginBottom: "1rem" }}
+            style={{ marginBottom: "0.75rem" }}
           >
             <div slot="title">Duration</div>
 
-            <div slot="message" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div
+              slot="message"
+              style={{ display: "flex", alignItems: "center", gap: "8px" }}
+            >
               <CalciteChip
                 scale="s"
                 style={{ "--calcite-chip-background-color": "#b70404" }}
@@ -413,36 +511,114 @@ export default function CustomerDetails({ feature }) {
 
               {/* Tag renders strictly when it is an LOP (4) Warning */}
               {isWarningSeverity && (
-                <CalciteChip
-                  scale="s"
-                  icon="exclamation-mark-triangle"
-                  style={{
-                    "--calcite-chip-background-color": "#ff4500",
-                    "color": "white",
-                    "fontWeight": "bold"
-                  }}
-                >
-                  WARNING
-                </CalciteChip>
-              )}
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      color: "#ff8c00",
+                      fontWeight: "bold",
+                      fontSize: "0.75rem", 
+                      padding: "0.15rem 0.6rem",
+             
+                    }}
+                  >
+                    <CalciteIcon icon="exclamation-mark-triangle" scale="s" />
+                    WARNING
+                  </span>
+                )}
             </div>
           </CalciteNotice>
         )}
 
-        {/* 2. Data List */}
+        {/* Unified Loading / Error / Data State */}
         {loading ? (
-          <div style={{ padding: "2rem", textAlign: "center" }}>
-            <CalciteLoader label="Loading details..." scale="m" />
+          <div style={{ padding: "1.25rem", textAlign: "center" }}>
+            {/* Updated label to reflect the whole component is loading */}
+            <CalciteLoader label="Loading customer details..." scale="s" />
           </div>
         ) : error ? (
-          <CalciteNotice kind="danger" icon="exclamation-mark-circle" open>
+          <CalciteNotice
+            kind="danger"
+            icon="exclamation-mark-circle"
+            open
+            scale="s"
+          >
             <div slot="title">Data Sync Error</div>
             <div slot="message">Could not retrieve live diagnostics.</div>
           </CalciteNotice>
         ) : (
-          <CalciteList> {fieldsToDisplay.map(renderItem)} </CalciteList>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: "0.5rem",
+            }}
+          >
+            {opticalMetrics.map((m) => {
+
+              return (
+                <div
+                  key={m.key}
+                  style={{
+                    background: SURFACE.cardBg,
+                    border: `1px solid ${SURFACE.border}`,
+                    borderLeft: `3px solid ${m.color}`,
+                    borderRadius: "5px",
+                    padding: "0.5rem",
+                    boxShadow: SURFACE.shadow,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start", // Aligns the pill to the left
+                    gap: "6px", // Adds a little breathing room between label and pill
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "0.58rem",
+                      fontWeight: 700,
+                      letterSpacing: "0.03em",
+                      textTransform: "uppercase",
+                      color: SURFACE.label,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {m.label}
+                  </div>
+
+                  {/* The Pill Highlight (Matches your screenshot) */}
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      fontWeight: 700,
+                      fontFamily: "var(--calcite-sans-family, sans-serif)",
+                      //backgroundColor: m.color,
+                      color: m.color,
+                      padding: "0.15rem 0.6rem",
+                      borderRadius: "50px", // Creates the exact pill shape
+                      display: "inline-block",
+                    }}
+                  >
+                    {m.value}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
-      </CalciteBlock>
+      </div>
+
+      {/* 1. Remaining Details Block */}
+      {/* ONLY render this block when we are completely done loading and have no errors */}
+      {!loading && !error && (
+        <CalciteBlock scale="s" open>
+          <CalciteList>
+            {fieldsToDisplay
+              .filter((f) => f.key !== "id" && !f.highlight)
+              .map(renderItem)}
+          </CalciteList>
+        </CalciteBlock>
+      )}
     </div>
   );
 }

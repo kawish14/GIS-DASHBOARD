@@ -34,6 +34,7 @@ import ChatWidget from "../../map_items/widgets/ChatWidget";
 import InactiveClusterPopup from './popup/InactiveClusterPopup';
 import InactiveCustomerDetails from './popup/InactiveCustomerDetails';
 import OLTCustomer from '../../map_items/widgets/customer/OLTCustomer';
+import FaultAnalytics from '../../map_items/widgets/customer/FaultAnalytics';
 
 // Mapped exactly to your new DB Keys
 const ACTIONS = [
@@ -49,7 +50,18 @@ export default function RightSidebar() {
   // Only subscribes to popup state + view. A `layers` or `realtimeStats`
   // change elsewhere no longer causes this component (and its Calcite
   // panel transition) to re-render.
-  const { popupFeature, setPopupFeature, parcelFeature, setParcelFeature } = usePopup();
+  const {
+    selectionStack, activeSelectionId, setActiveSelectionId, closeSelection, clearAllSelections,
+    updateSelectionFeature,
+    parcelFeature, setParcelFeature,
+  } = usePopup();
+  const activeEntry = useMemo(
+    () => selectionStack.find(e => e.id === activeSelectionId) || null,
+    [selectionStack, activeSelectionId]
+  );
+  // Alias so the render/effect logic below (written against a single
+  // feature) keeps working unchanged -- it always reflects the *active* tab.
+  const popupFeature = activeEntry?.feature ?? null;
   const { view } = useMapView();
   const { hasPermission } = useAuth();
 
@@ -98,15 +110,61 @@ export default function RightSidebar() {
     if (e?.target && panelRef.current && e.target !== panelRef.current) return;
     setIsCollapsed(true);
     if (activeTool === "Details") {
-      setPopupFeature(null);
+      clearAllSelections();
       setParcelFeature(null)
     }
-  }, [activeTool, setPopupFeature, setParcelFeature]);
+  }, [activeTool, clearAllSelections, setParcelFeature]);
+
+  // Switching tabs in the identify strip should also bring that tab's
+  // feature back into view on the map -- e.g. clicking back to the
+  // "Customer" tab after drilling into DC/POP re-centers on the customer,
+  // without disturbing any other tab's highlight.
+  const handleTabClick = useCallback(async (entry) => {
+    setActiveSelectionId(entry.id);
+    if (!view) return;
+
+    let target = entry.feature;
+
+    // Defensive: if this entry's feature somehow doesn't carry geometry
+    // (e.g. it was swapped for an attribute-only record along the way),
+    // pull it fresh from its layer by object id before navigating, rather
+    // than silently doing nothing.
+    if (target && !target.geometry && target.layer) {
+      try {
+        const layer = target.layer;
+        const objIdField = layer.objectIdField || "__OBJECTID";
+        const objectId = target.attributes?.[objIdField];
+        if (objectId !== undefined) {
+          const query = layer.createQuery();
+          query.returnGeometry = true;
+          query.outFields = ["*"];
+          query.objectIds = [objectId];
+          const results = await layer.queryFeatures(query);
+          if (results.features?.length) {
+            target = results.features[0];
+            target.layer = layer;
+            updateSelectionFeature(entry.id, target);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not refetch geometry for tab:", err);
+      }
+    }
+
+    if (target?.geometry) {
+      view.goTo({ target }).catch((err) => {
+        if (err.name !== "AbortError") console.error("Tab zoom failed:", err);
+      });
+    } else {
+      console.warn("No geometry available to navigate to for this tab:", entry);
+    }
+  }, [view, setActiveSelectionId, updateSelectionFeature]);
 
   // NEW: Fetch underlying features when a cluster or compressed point is clicked
   useEffect(() => {
     const fetchClusterFeatures = async () => {
       if (!popupFeature) return; // Exit early if null
+      const entryId = activeEntry?.id;
 
       if (popupFeature.isAggregate) {
         setIsClusterLoading(true);
@@ -163,6 +221,7 @@ export default function RightSidebar() {
           if (objectId !== undefined) {
              // Query the DATA LAYER (not LayerView) to get all attributes
              const query = layer.createQuery();
+             query.returnGeometry = true;
              query.outFields = ["*"];
 
              if (typeof objectId === 'string') {
@@ -181,8 +240,8 @@ export default function RightSidebar() {
                 // Flag to prevent the useEffect from triggering an infinite loop
                 fullFeature.isFullyLoaded = true;
 
-                // Push the rich data back into the App state!
-                setPopupFeature(fullFeature);
+                // Push the rich data back into that tab's entry (not a new tab).
+                if (entryId != null) updateSelectionFeature(entryId, fullFeature);
              }
           }
         } catch (error) {
@@ -192,7 +251,7 @@ export default function RightSidebar() {
     };
 
     fetchClusterFeatures();
-  }, [popupFeature, view, setPopupFeature]);
+  }, [popupFeature, activeEntry?.id, view, updateSelectionFeature]);
 
   const renderFeatureDetails = () => {
     // Priority 1: normal feature
@@ -286,6 +345,54 @@ export default function RightSidebar() {
         <FeatureGuard featureKey="tab_Details">
           <div style={{ display: activeTool === "Details" ? "block" : "none" }}>
            {/*  <SearchWidget />  */}
+
+            {/* ArcGIS Pro-style "Identify" tab strip: one tab per lookup in
+                the chain (Customer -> DC -> POP). Switching tabs never
+                clears another tab's map highlight -- that's owned per-entry
+                in PopupContext. */}
+            {selectionStack.length > 1 && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: "4px",
+                  padding: "6px 8px",
+                  overflowX: "auto",
+                  borderBottom: "1px solid var(--calcite-ui-border-3)",
+                }}
+              >
+                {selectionStack.map((entry, idx) => {
+                  const isActive = entry.id === activeSelectionId;
+                  const idLabel = entry.feature?.attributes?.id ?? entry.feature?.attributes?.name ?? "";
+                  return (
+                    <div
+                      key={entry.id}
+                      onClick={() => handleTabClick(entry)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "4px 8px",
+                        borderRadius: "6px",
+                        cursor: "pointer",
+                        fontSize: "0.72rem",
+                        whiteSpace: "nowrap",
+                        background: isActive ? "var(--calcite-ui-brand)" : "var(--calcite-ui-foreground-2)",
+                        color: isActive ? "#fff" : "var(--calcite-ui-text-1)",
+                      }}
+                    >
+                      <span>[{idx + 1}] {entry.label}{idLabel ? `: ${idLabel}` : ""}</span>
+                      <CalciteAction
+                        scale="s"
+                        icon="x"
+                        appearance="transparent"
+                        onClick={(e) => { e.stopPropagation(); closeSelection(entry.id); }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {renderFeatureDetails()}
           </div>
         </FeatureGuard>
@@ -359,6 +466,12 @@ export default function RightSidebar() {
                 <div style={{ padding: "1rem" }}>
                   <OLTCustomer />
                 </div>
+              </CalciteBlock>
+            </FeatureGuard>
+
+            <FeatureGuard featureKey="tool_FaultAnalytics">
+              <CalciteBlock heading="Fault Analytics" collapsible close>
+                <FaultAnalytics />
               </CalciteBlock>
             </FeatureGuard>
 

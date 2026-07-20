@@ -1,9 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import esriConfig from "@arcgis/core/config";
 import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer";
 import WMTSLayer from "@arcgis/core/layers/WMTSLayer";
 import WMSLayer from "@arcgis/core/layers/WMSLayer";
 import GroupLayer from "@arcgis/core/layers/GroupLayer";
+import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
+
 import { useLayers, useMapView } from "../../context/MapContext";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../../url";
@@ -20,169 +22,213 @@ import Distribution from "../layer_style/Distribution";
 import TWA_Sites from "../layer_style/TWA_Sites";
 import Longhaul from "../layer_style/Longhaul";
 
-esriConfig.request.timeout = 300000;
+esriConfig.request.timeout = 300000; // 5 min — GeoServer WFS requests can be slow for large regions
 
-export default function Layers(props) {
-  const layerAddedRef = useRef(false);
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+// Layers that only ever exist client-side (e.g. live vehicle markers) and
+// have no matching GeoServer layer — skip them entirely below.
+const CLIENT_SIDE_LAYERS = ["Vehicles"];
+
+// GeoServer layer name -> friendly display title for the parcel WMTS group.
+const PARCEL_DISPLAY_TITLES = {
+  "South_PostGIS:parcel_evw": "South Parcels",
+  "Central_Postgis:parcel_evw": "Central Parcels",
+  "North_Postgis:parcel_evw": "North Parcels",
+};
+
+// ---------------------------------------------------------------------------
+// Layer-name parsing & filtering
+// ---------------------------------------------------------------------------
+
+/** Splits "workspace:layer" into its parts; bare names default to the "web_app" workspace. */
+function parseLayerName(layerName) {
+  const [first, second] = layerName.split(":");
+  const hasWorkspace = second !== undefined;
+  return {
+    workspace: hasWorkspace ? first : "web_app",
+    title: hasWorkspace ? second : layerName,
+  };
+}
+
+/** Builds the CQL_FILTER for a GeoJSONLayer from the user's region permissions. */
+function buildRegionFilter({ workspace, title, regions }) {
+  if (workspace === "twa") return "";
+
+  const regionList = regions.map((r) => `'${r}'`).join(",");
+  let filter = `region IN (${regionList})`;
+
+  if (title === "Customers_test") {
+    filter += " AND alarmstate IN (1,2,3,4)";
+  }
+  return filter;
+}
+
+// ---------------------------------------------------------------------------
+// Layer factories
+// ---------------------------------------------------------------------------
+
+function createParcelWmtsLayer(layerName) {
+  return new WMTSLayer({
+    url: `${api}/geoserver/gwc/service/wmts`,
+    serviceMode: "KVP", // GeoServer GWC serves KVP, not REST-style capabilities docs
+    title: PARCEL_DISPLAY_TITLES[layerName] ?? "Parcels",
+    activeLayer: {
+      id: layerName,
+      tileMatrixSetId: "EPSG:900913",
+      format: "image/png",
+      style: "default",
+    },
+    opacity: 0.8,
+    minScale: 577791,
+    maxScale: 1127,
+    visible: true,
+  });
+}
+
+function createLandcoverWmsLayer() {
+  return new WMSLayer({
+    url: `${api}/geoserver/web_app/wms`,
+    title: "Landcover Base",
+    opacity: 0.8,
+    listMode: "hide", // hidden from the layer-list UI; visibility is driven programmatically
+    sublayers: [
+      {
+        name: "web_app:landcover_evw",
+        title: "Landcover (Imagery)",
+        visible: false, // starts hidden — synced to "Home Parcels" visibility, see below
+      },
+    ],
+  });
+}
+
+function createGeoJsonLayer({ workspace, layerName, title, filter }) {
+  const params = {
+    service: "WFS",
+    version: "2.0.0",
+    request: "GetFeature",
+    typeName: layerName,
+    outputFormat: "application/json",
+  };
+  if (filter) params.CQL_FILTER = filter;
+
+  return new GeoJSONLayer({
+    url: `${api}/geoserver/${workspace}/ows`,
+    customParameters: params,
+    title,
+    outFields: ["*"],
+    editingEnabled: true,
+    objectIdField: "objectid",
+    popupEnabled: false,
+    visible: true,
+  });
+}
+
+/** Sends a freshly-loaded GeoJSONLayer to the right position in the draw stack. */
+function reorderByGeometry(view, layer) {
+  layer.when(() => {
+    if (layer.geometryType === "point") {
+      view.map.reorder(layer, view.map.layers.length); // points on top
+    } else if (layer.geometryType === "polygon") {
+      view.map.reorder(layer, 0); // polygons at the bottom
+    } else if (layer.geometryType === "polyline") {
+      const polygonCount = view.map.layers.filter((l) => l.geometryType === "polygon").length;
+      view.map.reorder(layer, polygonCount); // lines sit just above polygons
+    }
+  });
+}
+
+/**
+ * Keeps the landcover imagery visible if and only if the "Home Parcels"
+ * group is visible. WMSLayer visibility has two independent levels — the
+ * layer itself AND each sublayer — so both must be toggled together or the
+ * imagery silently never renders.
+ */
+function syncLandcoverToParcelsVisibility(parcelsGroup, landcoverLayer) {
+  const landcoverSublayer = landcoverLayer.sublayers.getItemAt(0);
+
+  return reactiveUtils.watch(
+    () => parcelsGroup.visible,
+    (isVisible) => {
+      landcoverLayer.visible = isVisible;
+      if (landcoverSublayer) landcoverSublayer.visible = isVisible;
+    },
+    { initial: true }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function Layers() {
   const { view } = useMapView();
   const { registerLayer, unregisterLayer } = useLayers();
   const { layerNames, user } = useAuth();
 
   useEffect(() => {
     if (!view || layerNames.length === 0) return;
+    if (!user.permissions.regions || user.permissions.regions.length === 0) return; // wait for real region permissions
+    
 
-    // Create an array to track layers created in THIS effect run
-    const createdLayers = [];
-    const collectedParcels = [];
+    const createdLayerIds = [];
+    const parcelLayers = [];
+    let landcoverLayer = null;
+    let landcoverWatchHandle = null;
 
     layerNames.forEach((layerName) => {
-      
-      // 1. Skip Client-Side Layers
-      if (layerName === "Vehicles") return;
+      if (CLIENT_SIDE_LAYERS.includes(layerName)) return;
 
-      const nameParts = layerName.split(":");
-      const workspace = nameParts.length > 1 ? nameParts[0] : "web_app";
-      const cleanTitle = nameParts.length > 1 ? nameParts[1] : layerName;
+      const lowerName = layerName.toLowerCase();
+      const { workspace, title } = parseLayerName(layerName);
 
-      // ==========================================
-      // 🎯 WMTS PARCEL INTERCEPT
-      // ==========================================
-      if (layerName.toLowerCase().includes("parcel_evw")) {
-        
-        let displayTitle = "Parcels";
-        if (layerName === "South_PostGIS:parcel_evw") displayTitle = "South Parcels";
-        else if (layerName === "Central_Postgis:parcel_evw") displayTitle = "Central Parcels";
-        else if (layerName === "North_Postgis:parcel_evw") displayTitle = "North Parcels";
-
-        const wmtsLayer = new WMTSLayer({
-          url: api + "/geoserver/gwc/service/wmts",
-          title: displayTitle,
-          activeLayer: {
-            id: layerName,
-            tileMatrixSetId: "EPSG:900913",
-            format: "image/png",
-            style: "default",
-          },
-          opacity: 0.8,
-          minScale: 577791,
-          maxScale: 1127,
-          visible: true, // ⚠️ Must be true to show on map!
-        });
-
+      // Parcel tiles are collected now and grouped into "Home Parcels" below,
+      // rather than being registered individually.
+      if (lowerName.includes("parcel_evw")) {
+        const wmtsLayer = createParcelWmtsLayer(layerName);
         view.map.add(wmtsLayer);
-        
-        // Register it as "South Parcels" so LayerListSidebar finds it!
-        collectedParcels.push(wmtsLayer);
-
-      /*   createdLayers.push({ id: displayTitle, instance: wmtsLayer });
-        registerLayer(displayTitle, wmtsLayer); */
-        
-        return; // 🛑 EXIT early so it doesn't run your GeoJSON logic below
+        parcelLayers.push(wmtsLayer);
+        return;
       }
 
-      if(layerName.toLowerCase().includes("landcover_evw")) {
-        // 1. Define your WMS Layer
-        const landCover = new WMSLayer({
-          url: api + "/geoserver/web_app/wms",
-          sublayers: [
-            {
-              name: "web_app:landcover_evw",
-              title: "Landcover (Imagery)",
-              visible: false,
-            },
-          ],
-          opacity: 0.8,
-          listMode: "hide", // Hides it from standard layer lists
-          title: "Landcover Base",
-        });
-
-        // 2. Add layer to the map dynamically
-        // The optional index '0' adds it to the very bottom of the drawing stack
-        view.map.add(landCover, 0);
-
-        createdLayers.push({ id: "landCover", instance: landCover });
-
+      // Landcover imagery is created here but only registered once we know
+      // whether a parcel group exists to sync its visibility against.
+      if (lowerName.includes("landcover_evw")) {
+        landcoverLayer = createLandcoverWmsLayer();
+        view.map.add(landcoverLayer, 0); // bottom of the draw stack
+        return;
       }
 
-      // ==========================================
-      // YOUR ORIGINAL GEOJSON LOGIC (Untouched!)
-      // ==========================================
-      let filterPredicate = "";
-      
-      if (workspace !== "twa") {
-        const regions = user.permissions.regions;
-        const regionFilter = regions.map((r) => `'${r}'`).join(",");
-        filterPredicate = `region IN (${regionFilter})`;
+      const filter = buildRegionFilter({ workspace, title, regions: user.permissions.regions });
+      const geoJsonLayer = createGeoJsonLayer({ workspace, layerName, title, filter });
+      reorderByGeometry(view, geoJsonLayer);
 
-        if (cleanTitle === "Customers_test") {
-           filterPredicate += ` AND alarmstate IN (1,2,3,4)`;
-        }
-      }
-
-      const params = {
-        service: "WFS",
-        version: "2.0.0",
-        request: "GetFeature",
-        typeName: layerName,
-        outputFormat: "application/json",
-      };
-
-      if (filterPredicate !== "") {
-        params.CQL_FILTER = filterPredicate;
-      }
-
-      const layers = new GeoJSONLayer({
-        url: `${api}/geoserver/${workspace}/ows`,
-        customParameters: params,
-        title: cleanTitle,
-        outFields: ["*"],
-        editingEnabled: true, 
-        objectIdField: "objectid",
-        popupEnabled: false,
-        visible: true
-      });
-
-      layers.when(() => {
-        // ArcGIS geometry types: point, polyline, polygon
-        if (layers.geometryType === "point") {
-          view.map.reorder(layers, view.map.layers.length); // Bring to front
-        } else if (layers.geometryType === "polygon") {
-          view.map.reorder(layers, 0); // Send to back
-        } else if (layers.geometryType === "polyline") {
-          // Find how many polygons are there to sit above them
-          const polyCount = view.map.layers.filter(l => l.geometryType === "polygon").length;
-          view.map.reorder(layers, polyCount); 
-        }
-      });
-      
-      // Add to our local tracker and the global context
-      createdLayers.push({ id: cleanTitle, instance: layers });
-      registerLayer(cleanTitle, layers);
-
+      createdLayerIds.push(title);
+      registerLayer(title, geoJsonLayer);
     });
 
-    if (collectedParcels.length > 0) {
+    if (parcelLayers.length > 0) {
       const homeParcelsGroup = new GroupLayer({
         title: "Home Parcels",
-        layers: collectedParcels,
-        visibilityMode: "independent", // Allows turning children on/off individually if your UI supports it
-        visible: false
+        layers: parcelLayers,
+        visibilityMode: "independent", // lets individual regions be toggled if the UI supports it
+        visible: false,
       });
+      view.map.add(homeParcelsGroup, 0);
 
-      // Add the master group to the map (which adds all children automatically)
-      view.map.add(homeParcelsGroup, 0); // Put it at the bottom (index 0)
-
-      // Register ONLY the group layer in your context
-      createdLayers.push({ id: "Home Parcels", instance: homeParcelsGroup });
+      createdLayerIds.push("Home Parcels");
       registerLayer("Home Parcels", homeParcelsGroup);
 
+      if (landcoverLayer) {
+        landcoverWatchHandle = syncLandcoverToParcelsVisibility(homeParcelsGroup, landcoverLayer);
+      }
     }
-      
+
     return () => {
-      // Cleanup specifically what we created in this cycle
-      createdLayers.forEach(({ id }) => {
-        unregisterLayer(id);
-      });
+      createdLayerIds.forEach((id) => unregisterLayer(id));
+      landcoverWatchHandle?.remove();
     };
   }, [view, user.permissions.regions, layerNames]);
 

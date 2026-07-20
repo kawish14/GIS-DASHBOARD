@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import Legend from "@arcgis/core/widgets/Legend";
+import { useLayers } from "../../../context/MapContext";
+import { useAuth } from "../../../context/AuthContext"; // <-- NEW: Import Auth Context
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils";
 
 import {
@@ -7,7 +9,8 @@ import {
   CalciteAction,
   CalciteIcon,
   CalciteSlider,
-  CalciteSwitch 
+  CalciteSwitch,
+  CalciteButton
 } from "@esri/calcite-components-react";
 
 // Add any layer title to this list to automatically show the label toggle
@@ -18,6 +21,13 @@ const LABELABLE_LAYERS = [
   "site",
   "pop_boundary"
 ];
+
+// Pre-defined coordinates for regional navigation (Longitude, Latitude)
+const REGION_VIEWS = {
+  "South Parcels": { center: [67.0011, 24.8607], zoom: 12 },    // Karachi / Sindh
+  "Central Parcels": { center: [74.3587, 31.5204], zoom: 12 },  // Lahore / Punjab
+  "North Parcels": { center: [73.0479, 33.6844], zoom: 12 }     // Islamabad / North
+};
 
 const getLayerIcon = (layer) => {
   if (layer.type === "group") return "layers";
@@ -31,7 +41,8 @@ const getLayerIcon = (layer) => {
 
 export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle }) {
   const initialTitle = LAYER_LABELS[layer.title] || layer.title;
-  
+  const { layers } = useLayers();
+  const { user } = useAuth(); // <-- NEW: Get user from Auth
   const [isVisible, setIsVisible] = useState(layer.visible);
   const [opacity, setOpacity] = useState(layer.opacity || 1);
   const [labelsVisible, setLabelsVisible] = useState(layer.labelsVisible);
@@ -39,7 +50,6 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
 
   // Sync state with map changes
   useEffect(() => {
-    console.log(layer.title)
     const handle = reactiveUtils.watch(
       () => [layer.visible, layer.opacity, layer.labelsVisible],
       ([visible, op, lbls]) => {
@@ -51,15 +61,13 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
     return () => handle.remove();
   }, [layer]);
 
-  // --- THE FIX IS HERE ---
   useEffect(() => {
     let legend = null;
 
     if (isOpen && legendDiv.current) {
-      
       let legendLayer = layer;
       
-      // FIX: If this is a GroupLayer (like Home Parcels with 3 regions)
+      // If this is a GroupLayer (like Home Parcels with 3 regions)
       // Grab only the first child layer to prevent duplicate legends
       if (layer.type === "group" && layer.layers && layer.layers.length > 0) {
         legendLayer = layer.layers.getItemAt(0); 
@@ -70,7 +78,7 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
         container: legendDiv.current,
         layerInfos: [{ 
           layer: legendLayer, 
-          title: initialTitle // FIX: Overrides "parcel_evw" with "Home Parcels"
+          title: initialTitle 
         }]
       });
     }
@@ -83,9 +91,6 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
   const handleVisibilityToggle = (e) => {
     e.stopPropagation();
     layer.visible = !layer.visible;
-
-    console.log(layer.title, "visibility toggled to", layer.visible);
-
   };
 
   const handleOpacityChange = (e) => {
@@ -97,6 +102,18 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
     layer.labelsVisible = isChecked;
     setLabelsVisible(isChecked);
   };
+
+  // Map Navigation Function
+  const navigateToRegion = (regionTitle) => {
+    const target = REGION_VIEWS[regionTitle];
+    if (target && view) {
+      view.goTo({ center: target.center, zoom: target.zoom }, { duration: 1500 });
+    }
+  };
+
+  // --- NEW: Role check logic ---
+  // Adjust "user?.role" below to match exactly how your user object is structured (e.g., user?.department, user?.roleId, etc.)
+  const isCommercial_twa = user?.role?.toLowerCase() === "commercial" || user?.role?.toLowerCase() === "twa";
 
   return (
     <div className="border-b border-gray-700 last:border-b-0">
@@ -126,6 +143,30 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
       {isOpen && (
         <div className="bg-[#1f1f1f] p-4 border-l-2 border-blue-500 shadow-inner">
           
+          {/* Region Navigation UI for Parcels (RESTRICTED TO COMMERCIAL) */}
+          {layer.title === "Home Parcels" && layer.layers && layer.layers.length > 0 && isCommercial_twa && (
+            <div className="mb-4">
+              <h6 className="text-xs font-bold text-gray-500 uppercase mb-2 border-b border-gray-700 pb-1">
+                Navigate Map
+              </h6>
+              <div className="flex gap-2">
+                {layer.layers.toArray().map((subLayer) => (
+                  <CalciteButton
+                    key={subLayer.id}
+                    appearance="outline"
+                    scale="s"
+                    kind="brand"
+                    width="full"
+                    onClick={() => navigateToRegion(subLayer.title)}
+                  >
+                    {subLayer.title.replace(" Parcels", "")}
+                  </CalciteButton>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Label Toggle */}
           {LABELABLE_LAYERS.includes(layer.title) && (
             <div className="mb-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -153,6 +194,7 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
             />
           </div>
 
+          {/* Legend */}
           <div className="mt-2 bg-gray">
             <h6 className="text-xs font-bold text-gray-500 uppercase mb-2 border-b border-gray-700 pb-1">Legend</h6>
             <div 

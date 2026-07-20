@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
   CalciteList,
   CalciteListItem,
@@ -36,22 +36,22 @@ export default function RegionStats({
     let whereClause = "";
 
     switch (selectedFault) {
-      case FAULT_CODES.POWER_OFF: // Power Off
+      case FAULT_CODES.POWER_OFF: 
         whereClause = `alarmstate = ${FAULT_CODES.POWER_OFF}`;
         break;
-      case DERIVED_FAULT_CODES.LINK_DOWN_RECENT: // Link Down (< 7 days)
+      case DERIVED_FAULT_CODES.LINK_DOWN_RECENT: 
         whereClause = `alarmstate = ${FAULT_CODES.LINK_DOWN} AND lastdowntime >= '${complete_date}'`;
         break;
-      case DERIVED_FAULT_CODES.LINK_DOWN_STALE: // Link Down (>= 7 days)
+      case DERIVED_FAULT_CODES.LINK_DOWN_STALE: 
         whereClause = `alarmstate = ${FAULT_CODES.LINK_DOWN} AND lastdowntime <= '${complete_date}'`;
         break;
-      case FAULT_CODES.GPL: // GPL
+      case FAULT_CODES.GPL: 
         whereClause = `alarmstate = ${FAULT_CODES.GPL}`;
         break;
-      case DERIVED_FAULT_CODES.LOP_MINOR: // LOP Minor
+      case DERIVED_FAULT_CODES.LOP_MINOR: 
         whereClause = `alarmstate = ${FAULT_CODES.LOP} AND LOWER(perceived_severity) <> 'warning'`;
         break;
-      case DERIVED_FAULT_CODES.LOP_WARNING: // LOP Warning
+      case DERIVED_FAULT_CODES.LOP_WARNING: 
         whereClause = `alarmstate = ${FAULT_CODES.LOP} AND LOWER(perceived_severity) = 'warning'`;
         break;
       default:
@@ -84,17 +84,6 @@ export default function RegionStats({
   const totalCriticalFaults = Object.values(CriticalFaultData).reduce((a, b) => a + b, 0);
   const totalOtherFaults = Object.values(OtherFaultData).reduce((a, b) => a + b, 0);
 
-  // Kafka Stats for Health %
-  const onlineKafka = alertCount?.[region]?.Online || 0;
-  const criticalFaultsKafka = (alertCount?.[region]?.['Linked Down'] || 0) +
-                              (alertCount?.[region]?.['Low Optical Power'] || 0);
-
-  const otherFaultsKafka = (alertCount?.[region]?.['Power Off'] || 0) +
-                           (alertCount?.[region]?.['GEM Packet Loss'] || 0);
-
-  const totalAssets = onlineKafka + criticalFaultsKafka + otherFaultsKafka;
-  const healthPercentage = totalAssets > 0 ? ((onlineKafka / totalAssets) * 100).toFixed(1) : 0;
-
   // Helper to determine item style based on selection
   const getHighlightStyle = (faultType) => {
     if (!selectedFault) return "transition-all duration-300 opacity-100 cursor-pointer";
@@ -102,6 +91,37 @@ export default function RegionStats({
       ? "transition-all duration-300 opacity-100 scale-[1.02] z-10 bg-[var(--calcite-ui-foreground-2)] cursor-pointer"
       : "transition-all duration-300 opacity-30 grayscale-[0.5] blur-[0.5px] pointer-events-none cursor-default";
   };
+
+  const [showProgress, setShowProgress] = useState(true);
+  const [showCriticalProgress, setShowCriticalProgress] = useState(true);
+
+  // FIXED: Added 'region' to the dependency array
+  useEffect(() => {
+    let timer;
+    if (totalOtherFaults === 0) {
+      setShowProgress(true);
+      timer = setTimeout(() => {
+        setShowProgress(false);
+      }, 5000);
+    } else {
+      setShowProgress(false);
+    }
+    return () => clearTimeout(timer);
+  }, [totalOtherFaults, region]);
+
+  // FIXED: Added 'region' to the dependency array
+  useEffect(() => {
+    let timer;
+    if (totalCriticalFaults === 0) {
+      setShowCriticalProgress(true); 
+      timer = setTimeout(() => {
+        setShowCriticalProgress(false);
+      }, 5000);
+    } else {
+      setShowCriticalProgress(false); 
+    }
+    return () => clearTimeout(timer);
+  }, [totalCriticalFaults, region]);
 
   return (
     <div className="flex flex-col h-full bg-[var(--calcite-ui-foreground-1)]">
@@ -122,20 +142,18 @@ export default function RegionStats({
       <CalciteBlock scale="s" heading={`Critical Faults (${totalCriticalFaults.toLocaleString()})`} open collapsible>
         <CalciteIcon slot="icon" icon="exclamation-mark-triangle" style={{'--calcite-ui-icon-color': 'red'}} />
 
-        {totalCriticalFaults === 0 ?
-          <CalciteProgress type="indeterminate" label="Calculating critical faults..." text="No critical faults detected. Monitoring..." />
-          : null
-        }
-
-        {criticalFaultsKafka === 0 ? (
-          <div className="p-4">
-            <CalciteNotice open icon="check-circle" kind="success">
-              <div slot="message">No critical faults detected.</div>
-            </CalciteNotice>
-          </div>
+        {totalCriticalFaults === 0 ? (
+          showCriticalProgress ? (
+            <CalciteProgress type="indeterminate" label="Calculating critical faults..." text="No critical faults detected. Monitoring..." />
+          ) : (
+            <div className="p-4">
+              <CalciteNotice open icon="check-circle" kind="success">
+                <div slot="message">No critical faults detected.</div>
+              </CalciteNotice>
+            </div>
+          )
         ) : (
           <CalciteList>
-            {/* Link Down New */}
             {CriticalFaultData.linkDownShort > 0 && (
               <CalciteListItem
                 className={getHighlightStyle(DERIVED_FAULT_CODES.LINK_DOWN_RECENT)}
@@ -149,7 +167,6 @@ export default function RegionStats({
               </CalciteListItem>
             )}
 
-            {/* Link Down Stale */}
             {CriticalFaultData.linkDownLong > 0 && (
               <CalciteListItem
                 className={getHighlightStyle(DERIVED_FAULT_CODES.LINK_DOWN_STALE)}
@@ -163,7 +180,6 @@ export default function RegionStats({
               </CalciteListItem>
             )}
 
-            {/* LOP Minor */}
             {CriticalFaultData.lopMinor > 0 && (
               <CalciteListItem
                 className={getHighlightStyle(DERIVED_FAULT_CODES.LOP_MINOR)}
@@ -177,7 +193,6 @@ export default function RegionStats({
               </CalciteListItem>
             )}
 
-            {/* LOP Warning */}
             {CriticalFaultData.lopWarning > 0 && (
               <CalciteListItem
                 className={getHighlightStyle(DERIVED_FAULT_CODES.LOP_WARNING)}
@@ -198,20 +213,22 @@ export default function RegionStats({
       <CalciteBlock scale="s" heading={`Other Faults (${totalOtherFaults.toLocaleString()})`} open collapsible>
         <CalciteIcon slot="icon" icon="exclamation-mark-triangle" style={{'--calcite-ui-icon-color': 'yellow'}} />
 
-        {totalOtherFaults === 0 ?
-          <CalciteProgress type="indeterminate" label="Calculating other faults..." text="No other faults detected. Monitoring..." />
-          : null
-        }
-
-        {otherFaultsKafka === 0 ? (
-          <div className="p-4">
-            <CalciteNotice open icon="check-circle" kind="success">
-              <div slot="message">No other faults detected.</div>
-            </CalciteNotice>
-          </div>
+        {totalOtherFaults === 0 ? (
+          showProgress ? (
+            <CalciteProgress 
+              type="indeterminate" 
+              label="Calculating other faults..." 
+              text="No other faults detected. Monitoring..." 
+            />
+          ) : (
+            <div className="p-4">
+              <CalciteNotice open icon="check-circle" kind="success">
+                <div slot="message">No other faults detected.</div>
+              </CalciteNotice>
+            </div>
+          )
         ) : (
           <CalciteList>
-            {/* Power Off */}
             {OtherFaultData.powerOff > 0 && (
               <CalciteListItem
                 className={getHighlightStyle(FAULT_CODES.POWER_OFF)}
@@ -225,7 +242,6 @@ export default function RegionStats({
               </CalciteListItem>
             )}
 
-            {/* GPL */}
             {OtherFaultData.gpl > 0 && (
               <CalciteListItem
                 className={getHighlightStyle(FAULT_CODES.GPL)}
@@ -240,6 +256,7 @@ export default function RegionStats({
             )}
           </CalciteList>
         )}
+
       </CalciteBlock>
     </div>
   );

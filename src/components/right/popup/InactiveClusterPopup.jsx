@@ -169,11 +169,11 @@ export default function InactiveClusterPopup({ clusterFeatures }) {
       </CalciteBlock>
 
       {/* 3. Hardware Recovery List */}
-      <CalciteBlock heading="Hardware Recovery List" open collapsible scale="s">
+      <CalciteBlock heading="Customer List" open collapsible scale="s">
         <div slot="icon"><CalciteIcon icon="home" scale="s" /></div>
         <div style={{ padding: "12px 16px" }}>
             <p style={{ fontSize: "0.85rem", color: "#9ca3af", marginBottom: "12px", lineHeight: "1.4" }}>
-              The following equipment belongs to offline/inactive accounts in this cluster and should be collected.
+              The following are the customers in this cluster.
             </p>
             
             {/* Scrollable list of PRO cards */}

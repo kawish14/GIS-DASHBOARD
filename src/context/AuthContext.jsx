@@ -68,7 +68,7 @@ export function AuthProvider({ children }) {
     logoutTimeoutRef.current = setTimeout(() => {
       console.log("Inactivity detected. Logging out...");
       logout();
-    }, 30 * 60 * 1000);
+    }, 20 * 60 * 1000);
   }, [logout]);
 
   // Removed "load" from this list -- it fires once when the page loads,

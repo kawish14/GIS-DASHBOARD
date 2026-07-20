@@ -50,7 +50,7 @@ export default function SymbologyLayer({ layerKey, defaultVisible = false }) {
   // Apply the renderer once we have both the ArcGIS layer instance and its config.
   useEffect(() => {
     const layer = layers[layerKey];
-    console.log(`Applying symbology for "${layerKey}"`, { layer, config, view });
+   
     if (!layer || !config || !view) return;
 
     try {

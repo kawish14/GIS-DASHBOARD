@@ -7,7 +7,11 @@ import { api } from "../../../url";
 export default function GlobalClickHandler() {
   const { view } = useMapView();
   const { layers, layerView: storedLayerViews, setLayerView } = useLayers();
-  const { popupFeature, setPopupFeature, parcelFeature, setParcelFeature } = usePopup();
+  const {
+    selectionStack, setEntryHighlight,
+    startNewSelection, clearAllSelections,
+    parcelFeature, setParcelFeature,
+  } = usePopup();
 
   // Guards the async hit-test against out-of-order responses (user clicks
   // twice in quick succession before the first hitTest resolves).
@@ -86,8 +90,12 @@ export default function GlobalClickHandler() {
           setParcelFeature(null);
           // view.graphics.removeAll();
 
-          // Set main popup
-          setPopupFeature(clickedGraphic);
+          // A raw click on the map is a brand-new top-level lookup -- start
+          // a fresh identify stack (this clears any previously-open tabs
+          // and their highlights). Nested lookups from *inside* a popup use
+          // usePopup().pushSelection() instead, so they append rather than
+          // replace -- see DcDetails/CustomerDetails link handlers.
+          startNewSelection(clickedGraphic);
           return;
         }
 
@@ -111,7 +119,7 @@ export default function GlobalClickHandler() {
               console.error("GeoServer returned XML instead of JSON. Exception Report:", xmlText);
 
               // Abort this click handler gracefully
-              setPopupFeature(null);
+              clearAllSelections();
               setParcelFeature(null);
               return;
           }
@@ -146,7 +154,7 @@ export default function GlobalClickHandler() {
             });
 
             // Clear feature popup
-            setPopupFeature(null);
+            clearAllSelections();
 
             // Draw parcel
             view.graphics.removeAll();
@@ -158,13 +166,13 @@ export default function GlobalClickHandler() {
         }
 
         // STEP 3: NOTHING FOUND
-        setPopupFeature(null);
+        clearAllSelections();
         setParcelFeature(null);
         view.graphics.removeAll();
 
       } catch (error) {
         console.error("Click handling failed:", error);
-        setPopupFeature(null);
+        clearAllSelections();
         setParcelFeature(null);
       }
     };
@@ -172,45 +180,43 @@ export default function GlobalClickHandler() {
     const clickHandle = view.on("click", handleMapClick);
 
     return () => clickHandle.remove();
-  }, [view, layers, setPopupFeature, setParcelFeature]);
+  }, [view, layers, startNewSelection, clearAllSelections, setParcelFeature]);
 
   useEffect(() => {
     if (view && parcelFeature === null) view.graphics.removeAll();
   }, [parcelFeature, view]);
 
   // 3. HIGHLIGHT LOGIC
+  // Walks the whole identify stack and highlights any entry that doesn't
+  // have a highlight handle yet. Entries that are already highlighted are
+  // left untouched -- this is what keeps DC's highlight alive on the map
+  // while the user drills into POP. Removal is owned by PopupProvider
+  // (closeSelection / clearAllSelections), not here.
   useEffect(() => {
-    if (!view || !popupFeature) return;
+    if (!view) return;
 
-    let highlightHandle;
-    const layer = popupFeature.layer;
+    selectionStack.forEach(async (entry) => {
+      if (entry.highlightHandle) return;
 
-    if (!layer || layer.title === "zones" || layer.title === "pop_boundary") return;
+      const layer = entry.feature?.layer;
+      if (!layer || layer.title === "zones" || layer.title === "pop_boundary") return;
 
-    const performHighlight = async () => {
       try {
-        // Try to get from context first
         let targetLayerView = storedLayerViews[layer.title];
 
-        // Fallback: If Context is empty (rare), ask the view directly
         if (!targetLayerView || targetLayerView.destroyed) {
-           targetLayerView = await view.whenLayerView(layer);
+          targetLayerView = await view.whenLayerView(layer);
         }
 
         if (targetLayerView && !targetLayerView.destroyed) {
-          highlightHandle = targetLayerView.highlight(popupFeature);
+          const handle = targetLayerView.highlight(entry.feature);
+          setEntryHighlight(entry.id, handle);
         }
       } catch (e) {
         console.warn("Highlight skipped", e);
       }
-    };
-
-    performHighlight();
-
-    return () => {
-      if (highlightHandle) highlightHandle.remove();
-    };
-  }, [popupFeature, view, storedLayerViews]);
+    });
+  }, [selectionStack, view, storedLayerViews, setEntryHighlight]);
 
   return null;
 }
