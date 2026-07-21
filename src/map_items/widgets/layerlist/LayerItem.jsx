@@ -14,12 +14,13 @@ import {
 } from "@esri/calcite-components-react";
 
 // Add any layer title to this list to automatically show the label toggle
-const LABELABLE_LAYERS = [
+const LABEL_LAYERS = [
   "dc_odb", 
   "Vehicles",
   "pop",
   "site",
-  "pop_boundary"
+  "pop_boundary",
+  "Customers_test"
 ];
 
 // Pre-defined coordinates for regional navigation (Longitude, Latitude)
@@ -167,7 +168,7 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
           )}
 
           {/* Label Toggle */}
-          {LABELABLE_LAYERS.includes(layer.title) && (
+          {LABEL_LAYERS.includes(layer.title) && (
             <div className="mb-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CalciteIcon icon="label" scale="s" className="text-gray-500" />

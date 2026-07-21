@@ -1,17 +1,21 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { writeFileSync } from 'fs'
 
-// https://vite.dev/config/
+const APP_VERSION = Date.now().toString() // computed once per build
+
 export default defineConfig({
-  plugins: [react()],
-  server: {
-    allowedHosts: [
-      'gis.tes.com.pk',
-      'localhost',
-      '172.29.100.28'
-    ],
-    // If you want to continue using port 5000 in dev mode:
-    port: 5000,
-    host: true // This allows network access
+  plugins: [
+    react(),
+    {
+      name: 'write-version-file',
+      apply: 'build',
+      writeBundle(options) {
+        writeFileSync(`${options.dir}/version.json`, JSON.stringify({ version: APP_VERSION }))
+      }
+    }
+  ],
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION)
   }
 })

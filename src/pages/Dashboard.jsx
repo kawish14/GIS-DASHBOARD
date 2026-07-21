@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import TopBar from "../components/top/TopBar";
 import MapViews from "../components/center/MapView";
 import RightSidebar from "../components/right/RightSidebar";
@@ -19,6 +19,42 @@ function Dashboard() {
   const { view } = useMapView();
   const { selectedFeatures, setSelectedFeatures } = usePopup();
   const [isLoading, setIsLoading] = useState(true);
+
+  // --- Resizable table height ---
+  const centerContainerRef = useRef(null);
+  const isDraggingRef = useRef(false);
+  const [tableHeight, setTableHeight] = useState(320); // px, initial height when table opens
+
+  const MIN_TABLE_HEIGHT = 160; // always leave room to see the header + a couple rows
+  const MAP_MIN_HEIGHT = 200;   // never let the table squeeze the map away entirely
+
+  const handleDragStart = useCallback((e) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  useEffect(() => {
+    const handleDragMove = (e) => {
+      if (!isDraggingRef.current || !centerContainerRef.current) return;
+      const containerRect = centerContainerRef.current.getBoundingClientRect();
+      const newHeight = containerRect.bottom - e.clientY;
+      const maxHeight = containerRect.height - MAP_MIN_HEIGHT;
+      setTableHeight(Math.min(maxHeight, Math.max(MIN_TABLE_HEIGHT, newHeight)));
+    };
+    const handleDragEnd = () => {
+      isDraggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", handleDragMove);
+    window.addEventListener("mouseup", handleDragEnd);
+    return () => {
+      window.removeEventListener("mousemove", handleDragMove);
+      window.removeEventListener("mouseup", handleDragEnd);
+    };
+  }, []);
 
   const MAX_WAIT_MS = 5000;
   const CHECK_INTERVAL_MS = 200;
@@ -73,6 +109,7 @@ function Dashboard() {
       */}
 
       <div
+        ref={centerContainerRef}
         style={{
             display: "flex",
             flexDirection: "column",
@@ -92,13 +129,43 @@ function Dashboard() {
         {/* Map takes all available space initially */}
       <MapViews isLoading={isLoading} />
 
-        {/* Table takes fixed space when visible, pushing map up */}
+        {/* Table takes a user-adjustable height when visible, pushing map up.
+            Height is an explicit px value (not "auto") -- FeatureTable's own
+            root uses height: 100%, which only resolves against a parent that
+            has a real height, not "auto". */}
         {selectedFeatures.length > 0 && (
-            <div style={{ flex: "0 0 auto", height: "auto", maxHeight: "40%" }}>
+          <>
+            <div
+              onMouseDown={handleDragStart}
+              title="Drag to resize"
+              style={{
+                flex: "0 0 auto",
+                height: "6px",
+                cursor: "row-resize",
+                background: "transparent",
+                position: "relative",
+                zIndex: 5,
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: "2px",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: "40px",
+                  height: "3px",
+                  borderRadius: "2px",
+                  background: "var(--calcite-ui-border-2, #4b5563)",
+                }}
+              />
+            </div>
+            <div style={{ flex: "0 0 auto", height: `${tableHeight}px`, minHeight: 0, overflow: "hidden" }}>
                 <FeatureTable
                     features={selectedFeatures}
                 />
             </div>
+          </>
         )}
       </div>
 

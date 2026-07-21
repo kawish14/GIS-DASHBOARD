@@ -363,6 +363,7 @@ export default function RightSidebar() {
                 {selectionStack.map((entry, idx) => {
                   const isActive = entry.id === activeSelectionId;
                   const idLabel = entry.feature?.attributes?.id ?? entry.feature?.attributes?.name ?? "";
+                  console.log(entry)
                   return (
                     <div
                       key={entry.id}
@@ -380,7 +381,7 @@ export default function RightSidebar() {
                         color: isActive ? "#fff" : "var(--calcite-ui-text-1)",
                       }}
                     >
-                      <span>[{idx + 1}] {entry.label}{idLabel ? `: ${idLabel}` : ""}</span>
+                      <span>[{idx + 1}] {entry.label=== 'Customers_test' ? 'Customers' : entry.label}{idLabel ? `: ${idLabel}` : ""}</span>
                       <CalciteAction
                         scale="s"
                         icon="x"

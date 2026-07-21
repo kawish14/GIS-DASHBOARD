@@ -14,10 +14,11 @@ import HomeWidget from '../../map_items/widgets/HomeWidget'
 // Region -> default camera. Used both for the initial view and to re-center
 // the map if the user's region permissions arrive after the map has already
 // been created (the session check in AuthContext is async).
+
 const REGION_VIEWS = {
-  north: { center: [73.239156, 33.663228], scale: 144448 },
-  south: { center: [67.171837, 24.908468], scale: 144448 },
-  central: { center: [74.355626, 31.545676], scale: 144448 },
+  north: { center: [73.088438, 33.605487], scale: 288895 },
+  south: { center: [67.050987, 24.842437], scale: 288895 },
+  central: { center: [74.385495, 31.479528], scale: 288895 },
 };
 
 const DEFAULT_CENTER = [70.320449, 30.694832]; // Pakistan-wide management view

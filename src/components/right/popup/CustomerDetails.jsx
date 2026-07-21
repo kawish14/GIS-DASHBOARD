@@ -9,6 +9,7 @@ import {
   CalciteIcon,
   CalciteBlock,
   CalciteAction,
+  CalciteAlert
 } from "@esri/calcite-components-react";
 import { api } from "../../../../url";
 import { useMapView, useLayers, usePopup } from "../../../context/MapContext";
@@ -173,6 +174,8 @@ const fieldsToDisplay = [
   { key: "biasText", label: "Tx Bias Current", group: "Signal Performance", highlight: true },
 ];
 
+
+
 export default function CustomerDetails({ feature }) {
   const { view } = useMapView();
   const { layers } = useLayers();
@@ -182,6 +185,8 @@ export default function CustomerDetails({ feature }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+
+  const [alertOpen, setAlertOpen] = useState(false);
 
   // Initial Data
   const initialAttr = feature.attributes;
@@ -402,6 +407,36 @@ export default function CustomerDetails({ feature }) {
     { key: "biasText", label: "Tx Bias Current", value: data._powerInfo.biasText, color: data._powerInfo.biasKind },
   ] : [];
 
+  const handleCopy = (e) => {
+    e.stopPropagation();
+    const idToCopy = feature.attributes.id?.toString();
+    if (!idToCopy) return;
+
+    // Use modern clipboard API if on HTTPS or localhost
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(idToCopy);
+    } else {
+      // Fallback for standard HTTP (like 172.29.x.x)
+      const textArea = document.createElement("textarea");
+      textArea.value = idToCopy;
+      textArea.style.position = "absolute";
+      textArea.style.left = "-999999px";
+      document.body.prepend(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {
+        console.error("Fallback copy failed", err);
+      } finally {
+        textArea.remove();
+      }
+    }
+
+    // Trigger Alert for 3 seconds
+    setAlertOpen(true);
+    setTimeout(() => setAlertOpen(false), 3000);
+  };
+  
   return (
     <div
       scale="s"
@@ -411,9 +446,24 @@ export default function CustomerDetails({ feature }) {
         fontFamily: "var(--calcite-sans-family, inherit)",
       }}
     >
+
+    <CalciteAlert
+        open={alertOpen ? true : undefined}
+        icon="check-circle"
+        kind="success"
+        label="Copied"
+        placement="top"
+        scale="s"
+      >
+        <div slot="title">Copied!</div>
+        <div slot="message">Customer ID copied to clipboard.</div>
+      </CalciteAlert>
+
       {/* 0. Identity + Optical Dashboard -- always leads, regardless of fetch state */}
       <div
         style={{
+          display: "flex",
+          flexDirection: "column",
           padding: "0.85rem 1rem 1rem",
           background: SURFACE.panelBg,
         }}
@@ -438,16 +488,31 @@ export default function CustomerDetails({ feature }) {
             >
               Customer ID
             </div>
-            <div
-              style={{
-                fontSize: "1rem",
-                fontWeight: 700,
-                fontFamily: "var(--calcite-mono-family, monospace)",
-                color: "var(--calcite-ui-text-2)",
-                lineHeight: 1.3,
-              }}
-            >
-              {feature.attributes.id ?? "N/A"}
+            
+            {/* NEW: Flex container to hold the ID and the Copy Icon */}
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <div
+                style={{
+                  fontSize: "1rem",
+                  fontWeight: 700,
+                  fontFamily: "var(--calcite-mono-family, monospace)",
+                  color: "var(--calcite-ui-text-2)",
+                  lineHeight: 1.3,
+                }}
+              >
+                {feature.attributes.id ?? "N/A"}
+              </div>
+              
+              {/* Copy Action Button */}
+              {feature.attributes.id && (
+                <CalciteAction
+                  icon="copy-to-clipboard"
+                  text="Copy ID"
+                  scale="s"
+                  appearance="transparent"
+                  onClick={handleCopy}
+                />
+              )}
             </div>
           </div>
 
@@ -475,7 +540,7 @@ export default function CustomerDetails({ feature }) {
                   color: status.isUp ? NATIVE.ok : NATIVE.alarm,
                 }}
               >
-                {status.isUp ? "UP" : "DOWN"} · {status.label}
+                {status.label}
               </span>
             </div>
             {faultTime && (
@@ -511,30 +576,29 @@ export default function CustomerDetails({ feature }) {
 
               {/* Tag renders strictly when it is an LOP (4) Warning */}
               {isWarningSeverity && (
-                  <span
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      color: "#ff8c00",
-                      fontWeight: "bold",
-                      fontSize: "0.75rem", 
-                      padding: "0.15rem 0.6rem",
-             
-                    }}
-                  >
-                    <CalciteIcon icon="exclamation-mark-triangle" scale="s" />
-                    WARNING
-                  </span>
-                )}
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    color: "#ff8c00",
+                    fontWeight: "bold",
+                    fontSize: "0.70rem",
+                    padding: "0.15rem 0.6rem",
+                  }}
+                >
+                  <CalciteIcon icon="exclamation-mark-triangle" scale="s" />
+                  WARNING
+                </span>
+              )}
             </div>
           </CalciteNotice>
         )}
 
         {/* Unified Loading / Error / Data State */}
+       {/* Unified Loading / Error / Data State */}
         {loading ? (
           <div style={{ padding: "1.25rem", textAlign: "center" }}>
-            {/* Updated label to reflect the whole component is loading */}
             <CalciteLoader label="Loading customer details..." scale="s" />
           </div>
         ) : error ? (
@@ -548,63 +612,102 @@ export default function CustomerDetails({ feature }) {
             <div slot="message">Could not retrieve live diagnostics.</div>
           </CalciteNotice>
         ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 1fr)",
-              gap: "0.5rem",
-            }}
-          >
-            {opticalMetrics.map((m) => {
-
-              return (
-                <div
-                  key={m.key}
-                  style={{
-                    background: SURFACE.cardBg,
-                    border: `1px solid ${SURFACE.border}`,
-                    borderLeft: `3px solid ${m.color}`,
-                    borderRadius: "5px",
-                    padding: "0.5rem",
-                    boxShadow: SURFACE.shadow,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start", // Aligns the pill to the left
-                    gap: "6px", // Adds a little breathing room between label and pill
-                  }}
-                >
+          <>
+            {/* The 2-Column Grid */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, 1fr)", 
+                gap: "0.5rem",
+              }}
+            >
+              {opticalMetrics.map((m) => {
+                return (
                   <div
+                    key={m.key}
+                    style={{
+                      background: SURFACE.cardBg,
+                      border: `1px solid ${SURFACE.border}`,
+                      borderLeft: `3px solid ${m.color}`,
+                      borderRadius: "5px",
+                      padding: "0.5rem",
+                      boxShadow: SURFACE.shadow,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      gap: "6px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "0.58rem",
+                        fontWeight: 700,
+                        letterSpacing: "0.03em",
+                        textTransform: "uppercase",
+                        color: SURFACE.label,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {m.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.75rem",
+                        fontWeight: 700,
+                        fontFamily: "var(--calcite-sans-family, sans-serif)",
+                        color: m.color,
+                        padding: "0.15rem 0.6rem",
+                        borderRadius: "50px",
+                        display: "inline-block",
+                      }}
+                    >
+                      {m.value}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* NEW: Optical Metrics Legend */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: "1.25rem",
+                marginTop: "0.75rem",
+                paddingTop: "0.65rem",
+                borderTop: `1px solid ${SURFACE.border}`, // Adds a subtle visual divider
+              }}
+            >
+              {[
+                { label: "Normal", color: NATIVE.ok },
+                { label: "Warning", color: NATIVE.warn },
+                { label: "Alarm", color: NATIVE.alarm },
+              ].map((item) => (
+                <div key={item.label} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <div 
+                    style={{ 
+                      width: "8px", 
+                      height: "8px", 
+                      borderRadius: "50%", 
+                      backgroundColor: item.color 
+                    }} 
+                  />
+                  <span
                     style={{
                       fontSize: "0.58rem",
                       fontWeight: 700,
                       letterSpacing: "0.03em",
                       textTransform: "uppercase",
                       color: SURFACE.label,
-                      whiteSpace: "nowrap",
                     }}
                   >
-                    {m.label}
-                  </div>
-
-                  {/* The Pill Highlight (Matches your screenshot) */}
-                  <div
-                    style={{
-                      fontSize: "0.75rem",
-                      fontWeight: 700,
-                      fontFamily: "var(--calcite-sans-family, sans-serif)",
-                      //backgroundColor: m.color,
-                      color: m.color,
-                      padding: "0.15rem 0.6rem",
-                      borderRadius: "50px", // Creates the exact pill shape
-                      display: "inline-block",
-                    }}
-                  >
-                    {m.value}
-                  </div>
+                    {item.label}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 

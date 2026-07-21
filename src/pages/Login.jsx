@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   User, 
@@ -13,6 +13,10 @@ import { useAuth } from '../context/AuthContext';
 import { routeConfig } from '../routes/route';
 import logo from "../assets/images/TesLogo.png";
 
+// __APP_VERSION__ is injected at build time via vite.config.js `define`
+// (see setup notes) -- it's the version baked into *this* running bundle.
+/* global __APP_VERSION__ */
+
 export default function Login() {
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -22,6 +26,29 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Login is a safe place to check for a stale build: there's no
+  // unsaved user state here, so a silent one-time reload is harmless.
+  // Guarded by sessionStorage so a broken/missing version.json can't
+  // cause a reload loop.
+  useEffect(() => {
+    const checkForNewBuild = async () => {
+      try {
+        const res = await fetch(`/version.json?ts=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const { version } = await res.json();
+        const alreadyReloadedFor = sessionStorage.getItem('reloadedForVersion');
+        if (version && version !== __APP_VERSION__ && alreadyReloadedFor !== version) {
+          sessionStorage.setItem('reloadedForVersion', version);
+          window.location.reload();
+        }
+      } catch {
+        // Offline, or version.json not deployed yet -- fail silently,
+        // never block the login screen over this.
+      }
+    };
+    checkForNewBuild();
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
