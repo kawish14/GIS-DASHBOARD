@@ -4,6 +4,7 @@ import MapViews from "../components/center/MapView";
 import RightSidebar from "../components/right/RightSidebar";
 import LeftSidebar from "../components/left/LeftSidebar";
 import FeatureTable from "../components/bottom/FeatureTable";
+import AnalyticsDashboard from "../components/analytics/AnalyticsDashboard";
 import { useLayers, useMapView, usePopup } from "../context/MapContext";
 import {
   CalciteTabs,
@@ -19,6 +20,14 @@ function Dashboard() {
   const { view } = useMapView();
   const { selectedFeatures, setSelectedFeatures } = usePopup();
   const [isLoading, setIsLoading] = useState(true);
+
+  // Top-level workspace tab, ArcGIS Pro style: "map" | "analytics".
+  // Deliberately NOT used to conditionally mount <MapViews /> -- that
+  // component owns the ArcGIS Map/MapView instance and destroys it on
+  // unmount, so unmounting it on every tab switch would tear down the map
+  // and all loaded layers (which FaultAnalytics itself depends on via
+  // useLayers). Instead we keep it always mounted and just hide it.
+  const [activeView, setActiveView] = useState("map");
 
   // --- Resizable table height ---
   const centerContainerRef = useRef(null);
@@ -97,76 +106,91 @@ function Dashboard() {
         "--calcite-ui-text-1": "var(--text-primary)",
       }}
     >
-      <TopBar slot="header" /> {/* Ensure TopBar is in header slot if applicable, otherwise default flow */}
+      <TopBar slot="header" activeView={activeView} onViewChange={setActiveView} />
 
-      {/* Assuming Sidebars are Calcite Panels or correctly positioned via CSS */}
-      <LeftSidebar />
-      <RightSidebar />
+      {/* Sidebars are map-specific tooling (identify, layers, filters...) --
+          only meaningful while on the Map tab. They don't hold state that
+          needs to survive a tab switch, so it's safe to unmount them. */}
+      {activeView === "map" && (
+        <>
+          <LeftSidebar />
+          <RightSidebar />
+        </>
+      )}
 
-      {/* CENTER CONTENT AREA
-         This flex container becomes the "main" content of the shell.
-         It holds the Map and the Table vertically.
-      */}
+      {/* CENTER CONTENT AREA */}
+      <div style={{ height: "100%", width: "100%", overflow: "hidden" }}>
 
-      <div
-        ref={centerContainerRef}
-        style={{
-            display: "flex",
-            flexDirection: "column",
-            height: "100%",
-            width: "100%",
-            overflow: "hidden",
-            transition: "width 300ms ease-in-out",
-            // CSS containment: tells the browser this subtree's layout/paint
-            // is self-contained, so it doesn't need to be recomputed when a
-            // sibling (LeftSidebar / RightSidebar's CalciteShellPanel)
-            // resizes, and its own resizing doesn't ripple back out either.
-            // This is what stops one panel's open/close transition from
-            // visually disturbing its sibling.
-            contain: "layout style",
-        }}
-      >
-        {/* Map takes all available space initially */}
-      <MapViews isLoading={isLoading} />
+        {/* MAP WORKSPACE -- always mounted (never unmounted on tab switch)
+            so the ArcGIS Map/MapView instance and its loaded layers stay
+            alive. `display: contents` pulls it out of layout when hidden so
+            it doesn't reserve space or fight the analytics view, while
+            keeping it in the DOM tree. */}
+        <div style={{ display: activeView === "map" ? "contents" : "none" }}>
+          <div
+            ref={centerContainerRef}
+            style={{
+                display: "flex",
+                flexDirection: "column",
+                height: "100%",
+                width: "100%",
+                overflow: "hidden",
+                transition: "width 300ms ease-in-out",
+                // CSS containment: tells the browser this subtree's layout/paint
+                // is self-contained, so it doesn't need to be recomputed when a
+                // sibling (LeftSidebar / RightSidebar's CalciteShellPanel)
+                // resizes, and its own resizing doesn't ripple back out either.
+                // This is what stops one panel's open/close transition from
+                // visually disturbing its sibling.
+                contain: "layout style",
+            }}
+          >
+            {/* Map takes all available space initially */}
+          <MapViews isLoading={isLoading} />
 
-        {/* Table takes a user-adjustable height when visible, pushing map up.
-            Height is an explicit px value (not "auto") -- FeatureTable's own
-            root uses height: 100%, which only resolves against a parent that
-            has a real height, not "auto". */}
-        {selectedFeatures.length > 0 && (
-          <>
-            <div
-              onMouseDown={handleDragStart}
-              title="Drag to resize"
-              style={{
-                flex: "0 0 auto",
-                height: "6px",
-                cursor: "row-resize",
-                background: "transparent",
-                position: "relative",
-                zIndex: 5,
-              }}
-            >
-              <div
-                style={{
-                  position: "absolute",
-                  top: "2px",
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: "40px",
-                  height: "3px",
-                  borderRadius: "2px",
-                  background: "var(--calcite-ui-border-2, #4b5563)",
-                }}
-              />
-            </div>
-            <div style={{ flex: "0 0 auto", height: `${tableHeight}px`, minHeight: 0, overflow: "hidden" }}>
-                <FeatureTable
-                    features={selectedFeatures}
-                />
-            </div>
-          </>
-        )}
+            {/* Table takes a user-adjustable height when visible, pushing map up.
+                Height is an explicit px value (not "auto") -- FeatureTable's own
+                root uses height: 100%, which only resolves against a parent that
+                has a real height, not "auto". */}
+            {selectedFeatures.length > 0 && (
+              <>
+                <div
+                  onMouseDown={handleDragStart}
+                  title="Drag to resize"
+                  style={{
+                    flex: "0 0 auto",
+                    height: "6px",
+                    cursor: "row-resize",
+                    background: "transparent",
+                    position: "relative",
+                    zIndex: 5,
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "2px",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      width: "40px",
+                      height: "3px",
+                      borderRadius: "2px",
+                      background: "var(--calcite-ui-border-2, #4b5563)",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: "0 0 auto", height: `${tableHeight}px`, minHeight: 0, overflow: "hidden" }}>
+                    <FeatureTable
+                        features={selectedFeatures}
+                    />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ANALYTICS WORKSPACE */}
+        {activeView === "analytics" && <AnalyticsDashboard />}
       </div>
 
     </CalciteShell>

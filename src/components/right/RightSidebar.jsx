@@ -34,7 +34,6 @@ import ChatWidget from "../../map_items/widgets/ChatWidget";
 import InactiveClusterPopup from './popup/InactiveClusterPopup';
 import InactiveCustomerDetails from './popup/InactiveCustomerDetails';
 import OLTCustomer from '../../map_items/widgets/customer/OLTCustomer';
-import FaultAnalytics from '../../map_items/widgets/customer/FaultAnalytics';
 
 // Mapped exactly to your new DB Keys
 const ACTIONS = [
@@ -467,12 +466,6 @@ export default function RightSidebar() {
                 <div style={{ padding: "1rem" }}>
                   <OLTCustomer />
                 </div>
-              </CalciteBlock>
-            </FeatureGuard>
-
-            <FeatureGuard featureKey="tool_FaultAnalytics">
-              <CalciteBlock heading="Fault Analytics" collapsible close>
-                <FaultAnalytics />
               </CalciteBlock>
             </FeatureGuard>
 

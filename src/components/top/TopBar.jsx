@@ -12,7 +12,7 @@ import SearchWidget from "../../map_items/widgets/SearchWidget";
 import FeatureGuard from "../auth/FeatureGuard";
 import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS, createEmptyRegionStats } from "../../constants/faultCodes";
 
-export default function TopBar() {
+export default function TopBar({ activeView, onViewChange }) {
   const { user, logout } = useAuth();
   const { view } = useMapView();
   const { layers } = useLayers();
@@ -161,6 +161,30 @@ export default function TopBar() {
       {/* 1. Moved logo further left with ml-8 and added py-2 for vertical breathing room */}
       <div slot="logo" className="flex items-center ml-8 py-2">
         <img src={logo} alt="Logo" style={{ width: "140px", height: "auto", display: "block" }} />
+      </div>
+
+      {/* Map / Dashboard workspace switcher -- mirrors ArcGIS Pro's ribbon
+          tabs. Lives in content-center so it stays visually distinct from
+          the logo and the right-aligned tools/profile menu. */}
+      <div slot="content-center" className="flex items-center gap-1">
+        <CalciteButton
+          appearance={activeView === "map" ? "solid" : "transparent"}
+          kind={activeView === "map" ? "brand" : "neutral"}
+          scale="m"
+          iconStart="map"
+          onClick={() => onViewChange?.("map")}
+        >
+          Map
+        </CalciteButton>
+        <CalciteButton
+          appearance={activeView === "analytics" ? "solid" : "transparent"}
+          kind={activeView === "analytics" ? "brand" : "neutral"}
+          scale="m"
+          iconStart="graph-bar"
+          onClick={() => onViewChange?.("analytics")}
+        >
+          Dashboard
+        </CalciteButton>
       </div>
 
       <calcite-menu slot="content-end" className="flex items-center pr-6 gap-2">
