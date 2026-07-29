@@ -19,8 +19,7 @@ const LABEL_LAYERS = [
   "Vehicles",
   "pop",
   "site",
-  "pop_boundary",
-  "Customers_test"
+  "pop_boundary"
 ];
 
 // Pre-defined coordinates for regional navigation (Longitude, Latitude)

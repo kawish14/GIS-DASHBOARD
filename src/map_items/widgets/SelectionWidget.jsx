@@ -1,3 +1,4 @@
+// src/components/widgets/SelectionWidget.jsx (or your exact path)
 import React, { useEffect, useRef, useState } from "react";
 import { useArcGIS } from "../../context/MapContext";
 import SketchViewModel from "@arcgis/core/widgets/Sketch/SketchViewModel";
@@ -12,14 +13,15 @@ import {
   CalciteNotice,
   CalciteProgress
 } from "@esri/calcite-components-react";
-import {api} from "../../../url";
+import { api } from "../../../url";
+import { customerColumns } from '../../constants/columns'
 
 const MAX_AREA_SQKM = 10; 
 
 export default function SelectionWidget() {
-  const { view, layers, selectedFeatures, setSelectedFeatures } = useArcGIS();
+  // --- CHANGED: Now pulling tableData, addTableData, removeTableData ---
+  const { view, layers, tableData, addTableData, removeTableData } = useArcGIS();
   
-  // State
   const [bufferDistance, setBufferDistance] = useState(0);
   const [bufferInput, setBufferInput] = useState("0");
   const [activeTool, setActiveTool] = useState(null);
@@ -28,11 +30,9 @@ export default function SelectionWidget() {
   const [selectionMode, setSelectionMode] = useState("layer"); 
   const [geometryInfo, setGeometryInfo] = useState(""); 
   
-  // States for Loading & Errors
   const [loadingState, setLoadingState] = useState({ active: false, message: "", progress: null });
   const [errorMessage, setErrorMessage] = useState("");
 
-  // Refs
   const sketchVM = useRef(null);
   const sketchLayer = useRef(null);
   const bufferLayer = useRef(null);
@@ -55,18 +55,20 @@ export default function SelectionWidget() {
     executeRef.current = executeSelection;
   }); 
 
+  // --- CHANGED: Listen to the "selection" tab to detect external clears ---
+  const selectionFeatures = tableData?.selection?.features;
   useEffect(() => {
     if (isSelfUpdate.current) {
         isSelfUpdate.current = false;
         return; 
     }
     const hasGraphics = sketchLayer.current && sketchLayer.current.graphics.length > 0;
-    const isExternalClear = selectedFeatures && selectedFeatures.length === 0;
+    const isExternalClear = !selectionFeatures || selectionFeatures.length === 0;
 
     if (isExternalClear && hasGraphics) {
         clearSelectionUI();
     }
-  }, [selectedFeatures]); 
+  }, [selectionFeatures]); 
 
   useEffect(() => {
     if (!view || !view.map || !layers) return;
@@ -162,7 +164,6 @@ export default function SelectionWidget() {
 
     const canBuffer = geometry.type === "point" || geometry.type === "polyline";
 
-    // Create Buffer if applicable
     if (canBuffer && safeDist > 0) {
       searchGeometry = geometryEngine.geodesicBuffer(geometry, safeDist, "meters");
       const bufferGraphic = new Graphic({
@@ -176,7 +177,6 @@ export default function SelectionWidget() {
       bufferLayer.current.add(bufferGraphic);
     }
 
-    // --- Calculate Display Metrics (Area / Length) ---
     if (searchGeometry.type === "polygon" || searchGeometry.type === "extent") {
       const polyToMeasure = searchGeometry.type === "extent" ? Polygon.fromExtent(searchGeometry) : searchGeometry;
       const areaSqM = geometryEngine.geodesicArea(polyToMeasure, "square-meters");
@@ -196,7 +196,6 @@ export default function SelectionWidget() {
       let finalFeatures = [];
 
       if (currentMode === "layer") {
-        // Removed setLoadingState here so local view queries remain instant without UI flicker
         const query = layers.Customers_test.createQuery();
         query.geometry = searchGeometry;
         query.spatialRelationship = "intersects";
@@ -214,10 +213,6 @@ export default function SelectionWidget() {
       } else if (currentMode === "api") {
         const extent = searchGeometry.extent;
         
-        // Block Massive Requests
-       /*  const extentPolygon = Polygon.fromExtent(extent);
-        const areaSqKm = geometryEngine.geodesicArea(extentPolygon, "square-kilometers"); */
-
         const areaSqKm = searchGeometry.type === "extent" 
         ? geometryEngine.geodesicArea(Polygon.fromExtent(searchGeometry), "square-kilometers")
         : geometryEngine.geodesicArea(searchGeometry, "square-kilometers");
@@ -296,15 +291,16 @@ export default function SelectionWidget() {
         }
       }
 
-      if (setSelectedFeatures) {
+      // --- CHANGED: Push to the Table Dictionary ---
+      if (addTableData) {
         isSelfUpdate.current = true; 
-        setSelectedFeatures(finalFeatures);
+        addTableData("selection", "Spatial Selection", finalFeatures, customerColumns);
       }
+
     } catch (error) {
       console.error("Selection error:", error);
       setErrorMessage("Failed to process selection: " + error.message);
     } finally {
-      // This will clear the API loading state safely, and does nothing harmful if it was already false from the local view query
       setLoadingState({ active: false, message: "", progress: null });
     }
   };
@@ -348,9 +344,10 @@ export default function SelectionWidget() {
 
   const clearSelection = () => {
     clearSelectionUI();
-    if (setSelectedFeatures) {
+    // --- CHANGED: Remove only the "selection" tab ---
+    if (removeTableData) {
         isSelfUpdate.current = true; 
-        setSelectedFeatures([]); 
+        removeTableData("selection");
     }
   };
 
@@ -358,58 +355,39 @@ export default function SelectionWidget() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-      
-      {/* Target Scope Toggle */}
       <CalciteLabel>
         Selection Scope
         <select 
           value={selectionMode} 
           onChange={(e) => setSelectionMode(e.target.value)}
-          style={{ 
-            width: "100%", padding: "8px", marginTop: "6px", 
-            backgroundColor: "#2b2b2b", color: "#dedede",
-            border: "1px solid var(--calcite-ui-border-3)", borderRadius: "0px"
-          }}
+          style={{ width: "100%", padding: "8px", marginTop: "6px", backgroundColor: "#2b2b2b", color: "#dedede", border: "1px solid var(--calcite-ui-border-3)", borderRadius: "0px" }}
         >
           <option value="layer" style={{ color: "#dedede", backgroundColor: "#2b2b2b" }}>Current View</option>
           <option value="api" style={{ color: "#dedede", backgroundColor: "#2b2b2b" }}>All Customers</option>
         </select>
       </CalciteLabel>
 
-      {/* Error Notice */}
       {errorMessage && (
         <CalciteNotice open icon="exclamation-mark-triangle" kind="danger">
           <div slot="message">{errorMessage}</div>
         </CalciteNotice>
       )}
 
-      {/* Loading Progress */}
       {loadingState.active && (
         <div style={{ padding: "10px", backgroundColor: "rgba(0, 255, 255, 0.1)", border: "1px solid cyan", borderRadius: "4px" }}>
           <div style={{ fontSize: "0.85rem", marginBottom: "8px", color: "cyan" }}>
             {loadingState.message}
           </div>
-          <CalciteProgress 
-            type={loadingState.progress !== null ? "determinate" : "indeterminate"} 
-            value={loadingState.progress !== null ? loadingState.progress : undefined} 
-          />
+          <CalciteProgress type={loadingState.progress !== null ? "determinate" : "indeterminate"} value={loadingState.progress !== null ? loadingState.progress : undefined} />
         </div>
       )}
 
-      {/* Geometry Area / Length Readout */}
       {hasGeometry && geometryInfo && (
-        <div style={{ 
-          padding: "8px 12px", 
-          backgroundColor: "rgba(128, 128, 128, 0.1)", 
-          borderLeft: "3px solid var(--calcite-ui-brand)",
-          borderRadius: "4px", 
-          fontSize: "0.85rem" 
-        }}>
+        <div style={{ padding: "8px 12px", backgroundColor: "rgba(128, 128, 128, 0.1)", borderLeft: "3px solid var(--calcite-ui-brand)", borderRadius: "4px", fontSize: "0.85rem" }}>
           <strong>Coverage: </strong> {geometryInfo}
         </div>
       )}
 
-      {/* Buffer Input */}
       <CalciteLabel disabled={!isBufferEnabled ? true : undefined}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Buffer Distance (Meters)</span>
@@ -430,7 +408,6 @@ export default function SelectionWidget() {
         />
       </CalciteLabel>
 
-      {/* Drawing Tools */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
         <CalciteButton appearance={activeTool === "point" ? "solid" : "outline"} icon-start="pin" onClick={() => startTool("point")}>Point</CalciteButton>
         <CalciteButton appearance={activeTool === "line" ? "solid" : "outline"} icon-start="line" onClick={() => startTool("line")}>Line</CalciteButton>

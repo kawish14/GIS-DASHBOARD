@@ -2,6 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+/* #009af2 */
+
 /* =========================================
    1. GLOBAL THEME VARIABLES
    ========================================= */
@@ -24,6 +26,7 @@
   --calcite-ui-brand-hover: var(--text-highlight);
   
   /* Text Colors */
+  --calcite-ui-text-0:#009af2;
   --calcite-ui-text-1: var(--text-main);
   --calcite-ui-text-2: var(--text-muted);
   --calcite-ui-text-3:#2d3748;

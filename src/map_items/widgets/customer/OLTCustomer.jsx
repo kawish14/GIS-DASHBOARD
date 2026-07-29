@@ -1,3 +1,4 @@
+// src/components/widgets/OLTCustomer.jsx
 import React, { useState, useEffect } from "react";
 import {
   CalciteLabel,
@@ -13,16 +14,14 @@ import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer";
 import { useArcGIS } from "../../../context/MapContext";
 import { useAuth } from "../../../context/AuthContext";
 import { Realtime } from '../../../../url'; 
+import { customerColumns } from '../../../constants/columns';
 
 export default function OLTCustomer() {
-  // 1. ADDED: Destructure setSelectedFeatures from MapContext
-  const { view, customerLayerView, setSelectedFeatures } = useArcGIS(); 
+  const { view, customerLayerView, addTableData, removeTableData, tableData, setTableVisibility } = useArcGIS(); 
   const { user } = useAuth(); 
   
-  // Extract user regions
   const REGIONS = user?.permissions?.regions || [];
 
-  // State Management
   const [oltList, setOltList] = useState([]);
   const [selectedOlt, setSelectedOlt] = useState("");
   const [filterScope, setFilterScope] = useState("CURRENT_VIEW"); 
@@ -32,7 +31,6 @@ export default function OLTCustomer() {
   const [error, setError] = useState(null);
   const [isFiltered, setIsFiltered] = useState(false);
 
-  // Fetch and Filter OLT Data on Mount
   useEffect(() => {
     const fetchOLTs = async () => {
       try {
@@ -41,11 +39,9 @@ export default function OLTCustomer() {
         const result = await response.json();
 
         if (result.success) {
-          // Keep OLTs where the item.region matches a region in the user's REGIONS array.
           const permittedOLTs = REGIONS.length > 0 
             ? result.data.filter((item) => REGIONS.includes(item.region))
             : []; 
-
           setOltList(permittedOLTs);
         } else {
           throw new Error(result.message || "Failed to fetch OLTs");
@@ -59,23 +55,26 @@ export default function OLTCustomer() {
     };
 
     fetchOLTs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
-  // Helper to remove temporary WFS layer if it exists
   const removeWFSLayer = () => {
     if (view && view.map) {
       const existingLayer = view.map.layers.find(layer => layer.title === "Customers_test_WFS");
-      if (existingLayer) {
-        view.map.remove(existingLayer);
-      }
+      if (existingLayer) view.map.remove(existingLayer);
     }
   };
 
-  // Handle Apply Filter
-  const handleFilter = async () => {
+  // --- SMART CACHE CHECK ---
+  const currentParams = JSON.stringify({ selectedOlt, filterScope });
+  const isCached = tableData?.olt?.filterParams === currentParams;
+
+  const handleActionClick = async () => {
+    if (isCached) {
+      setTableVisibility("olt", true);
+      return;
+    }
+
     if (!view || !view.map || !selectedOlt) return;
-    
     setIsApplying(true);
     setError(null);
 
@@ -83,14 +82,12 @@ export default function OLTCustomer() {
       const safeOlt = selectedOlt.replace(/'/g, "''");
 
       if (filterScope === "CURRENT_VIEW") {
-        // --- OPTION 1: CURRENT VIEW (Client-Side) ---
         removeWFSLayer(); 
         
         if (customerLayerView) {
           const whereClause = `olt = '${safeOlt}'`;
           customerLayerView.filter = { where: whereClause };
 
-          // 2. ADDED: Query the underlying layer to get full attribute data for the table
           const query = customerLayerView.layer.createQuery();
           query.where = whereClause;
           query.outFields = ["*"];
@@ -98,23 +95,20 @@ export default function OLTCustomer() {
 
           const featureSet = await customerLayerView.layer.queryFeatures(query);
           
-          // Push features to context so FeatureTable.jsx opens automatically
-          if (setSelectedFeatures) {
-            setSelectedFeatures(featureSet.features);
+          if (addTableData) {
+            addTableData("olt", "OLT Customers", featureSet.features, customerColumns, currentParams);
           }
         } else {
           console.warn("customerLayerView is not fully loaded yet.");
         }
 
       } else if (filterScope === "ALL_CUSTOMERS") {
-        // --- OPTION 2: ALL CUSTOMERS (Server-Side WFS) ---
         if (customerLayerView) {
           customerLayerView.filter = null; 
         }
         removeWFSLayer();
 
         const cqlFilter = `olt='${safeOlt}'`;
-        
         const wfsUrl = `http://gis.tes.com.pk:29881/geoserver/web_app/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=web_app%3ACustomers_test&outputFormat=application%2Fjson&maxFeatures=1000000&cql_filter=${encodeURIComponent(cqlFilter)}`;
 
         const wfsLayer = new GeoJSONLayer({
@@ -132,10 +126,8 @@ export default function OLTCustomer() {
         });
 
         view.map.add(wfsLayer);
-        
         await view.whenLayerView(wfsLayer);
         
-        // 3. ADDED: Query the newly added WFS layer and push to the table
         const query = wfsLayer.createQuery();
         query.where = "1=1";
         query.outFields = ["*"];
@@ -145,9 +137,8 @@ export default function OLTCustomer() {
         
         if (featureSet.features.length > 0) {
            view.goTo(featureSet.features);
-           // Push features to context so FeatureTable.jsx opens automatically
-           if (setSelectedFeatures) {
-             setSelectedFeatures(featureSet.features);
+           if (addTableData) {
+             addTableData("olt", "OLT Customers", featureSet.features, customerColumns, currentParams);
            }
         }
       }
@@ -161,29 +152,16 @@ export default function OLTCustomer() {
     }
   };
 
-  // Handle Clearing the Filter
   const handleClear = () => {
     setSelectedOlt(""); 
-    
-    // Clear Client-side filter
-    if (customerLayerView) {
-      customerLayerView.filter = null; 
-    }
-    
-    // Clear Server-side layer
+    if (customerLayerView) customerLayerView.filter = null; 
     removeWFSLayer();
-
-    // 4. ADDED: Empty out the table features so the BottomPanel hides itself
-    if (setSelectedFeatures) {
-      setSelectedFeatures([]);
-    }
-    
+    if (removeTableData) removeTableData("olt");
     setIsFiltered(false);
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      
       {error && (
         <CalciteNotice open icon="exclamation-mark-triangle" kind="danger">
           <div slot="message">{error}</div>
@@ -204,11 +182,7 @@ export default function OLTCustomer() {
         <>
           <CalciteLabel>
             Search Scope
-            <CalciteSelect
-              value={filterScope}
-              onCalciteSelectChange={(e) => setFilterScope(e.target.value)}
-              disabled={isApplying}
-            >
+            <CalciteSelect value={filterScope} onCalciteSelectChange={(e) => setFilterScope(e.target.value)} disabled={isApplying}>
               <CalciteOption label="Current View (Map Display)" value="CURRENT_VIEW" />
               <CalciteOption label="All Customers (Database Fetch)" value="ALL_CUSTOMERS" />
             </CalciteSelect>
@@ -240,22 +214,10 @@ export default function OLTCustomer() {
       )}
 
       <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-        <CalciteButton 
-          appearance="solid"
-          onClick={handleFilter} 
-          loading={isApplying}
-          disabled={!selectedOlt || isLoading} 
-          style={{ flex: 1 }}
-        >
-          View on Map
+        <CalciteButton appearance="solid" onClick={handleActionClick} loading={isApplying} disabled={!selectedOlt || isLoading} style={{ flex: 1 }}>
+          {isCached ? "View Table" : "View on Map"}
         </CalciteButton>
-        <CalciteButton 
-          onClick={handleClear} 
-          appearance="outline" 
-          kind="danger" 
-          disabled={!isFiltered && !selectedOlt} 
-          style={{ flex: 1 }}
-        >
+        <CalciteButton onClick={handleClear} appearance="outline" kind="danger" disabled={!isFiltered && !tableData?.olt} style={{ flex: 1 }}>
           Clear
         </CalciteButton>
       </div>
@@ -265,7 +227,6 @@ export default function OLTCustomer() {
           <div slot="message">Filter applied successfully.</div>
         </CalciteNotice>
       )}
-      
     </div>
   );
 }

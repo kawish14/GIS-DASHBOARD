@@ -35,7 +35,7 @@ export default function Realtime() {
 
       const query = layer.createQuery();
       query.where = "alarmstate IN (1, 2, 3, 4)";
-      query.outFields = ["region", "alarmstate", "lastdowntime", "perceived_severity"];
+      query.outFields = ["region", "alarmstate", "fault_time", "perceived_severity"];
 
       const results = await layer.queryFeatures(query);
       if (!isMountedRef.current) return;
@@ -45,12 +45,12 @@ export default function Realtime() {
       results.features.forEach((feature) => {
         const region = feature.attributes.region;
         const state = feature.attributes.alarmstate;
-        const lastDownTime = feature.attributes.lastdowntime;
+        const fault_time = feature.attributes.fault_time;
         const severity = feature.attributes.perceived_severity;
 
         if (newStats[region]) {
           if (state === 2) {
-            const recordTime = new Date(lastDownTime).getTime();
+            const recordTime = new Date(fault_time).getTime();
             if (recordTime <= sevenDaysAgo) {
               newStats[region]["2_long"]++;
             } else {

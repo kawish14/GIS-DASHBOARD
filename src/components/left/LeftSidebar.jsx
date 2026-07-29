@@ -23,6 +23,16 @@ const ACTIONS = [
   { text: "Active Users", icon: "users", featureKey: "tab_Active_Users" }
 ];
 
+// Auto-discovered by src/permissions/featureRegistry.js -- ACTIONS above is
+// already the single source of truth for which tabs exist here, so this
+// just re-shapes it for the admin panel instead of maintaining a second,
+// separate list that could drift out of sync with it.
+export const featureMeta = ACTIONS.map(({ featureKey, text }) => ({
+  key: featureKey,
+  label: `${text} Tab`,
+  group: "Left Sidebar Tab",
+}));
+
 const REGION_COORDINATES = {
   North: { target: [73.088438, 33.605487], zoom: 11 },
   South: { target: [67.050987, 24.842437], zoom: 11 },

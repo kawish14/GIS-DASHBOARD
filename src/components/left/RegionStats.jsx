@@ -40,10 +40,10 @@ export default function RegionStats({
         whereClause = `alarmstate = ${FAULT_CODES.POWER_OFF}`;
         break;
       case DERIVED_FAULT_CODES.LINK_DOWN_RECENT: 
-        whereClause = `alarmstate = ${FAULT_CODES.LINK_DOWN} AND lastdowntime >= '${complete_date}'`;
+        whereClause = `alarmstate = ${FAULT_CODES.LINK_DOWN} AND fault_time >= '${complete_date}'`;
         break;
       case DERIVED_FAULT_CODES.LINK_DOWN_STALE: 
-        whereClause = `alarmstate = ${FAULT_CODES.LINK_DOWN} AND lastdowntime <= '${complete_date}'`;
+        whereClause = `alarmstate = ${FAULT_CODES.LINK_DOWN} AND fault_time <= '${complete_date}'`;
         break;
       case FAULT_CODES.GPL: 
         whereClause = `alarmstate = ${FAULT_CODES.GPL}`;
@@ -102,7 +102,7 @@ export default function RegionStats({
       setShowProgress(true);
       timer = setTimeout(() => {
         setShowProgress(false);
-      }, 5000);
+      }, 8000);
     } else {
       setShowProgress(false);
     }
@@ -116,7 +116,7 @@ export default function RegionStats({
       setShowCriticalProgress(true); 
       timer = setTimeout(() => {
         setShowCriticalProgress(false);
-      }, 5000);
+      }, 8000);
     } else {
       setShowCriticalProgress(false); 
     }

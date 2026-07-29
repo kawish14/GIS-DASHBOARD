@@ -34,6 +34,8 @@ import ChatWidget from "../../map_items/widgets/ChatWidget";
 import InactiveClusterPopup from './popup/InactiveClusterPopup';
 import InactiveCustomerDetails from './popup/InactiveCustomerDetails';
 import OLTCustomer from '../../map_items/widgets/customer/OLTCustomer';
+import AlarmAnalyticsFilter from "../../map_items/widgets/customer/AlarmAnalyticsFilter";
+import AnalyticsRecordPopup from "./popup/AnalyticsRecordPopup";
 
 // Mapped exactly to your new DB Keys
 const ACTIONS = [
@@ -43,6 +45,39 @@ const ACTIONS = [
   { text: "Filter", icon: "layer-filter", featureKey: "tab_Filter" },
   // New AI Chat Action
   { text: "AI Chat", icon: "speech-bubbles", featureKey: "tab_AIChat" }
+];
+
+// Auto-discovered by src/permissions/featureRegistry.js. The top-level tabs
+// come straight from ACTIONS above (same reasoning as LeftSidebar.jsx); the
+// nested tool-level entries are declared here because this file is where
+// their <FeatureGuard featureKey="..."> calls actually live below -- keep
+// each entry next to the JSX it gates, not in a separate list that can
+// silently fall out of sync with it (which is exactly what happened to
+// tool_FaultAnalytics after it moved out of this file's Filter tab -- see
+// AnalyticsDashboard.jsx for its corrected entry).
+//
+// NOTE: tab_AIChat and tool_heatMap are intentionally left out below --
+// their FeatureGuard blocks are commented out further down, so they aren't
+// live features right now. Un-comment the block AND add the entry back
+// together when that ships.
+export const featureMeta = [
+  ...ACTIONS.filter((a) => a.featureKey !== "tab_AIChat").map(({ featureKey, text }) => ({
+    key: featureKey,
+    label: `${text} Tab`,
+    group: "Right Sidebar Tab",
+  })),
+  { key: "tool_base_map", label: "Base Map Switcher", group: "Right Sidebar Tab", tab: "tab_Map_Tools" },
+  { key: "tool_selection", label: "Selection Tools", group: "Right Sidebar Tab", tab: "tab_Map_Tools" },
+  { key: "tool_densityMap", label: "Density Map", group: "Right Sidebar Tab", tab: "tab_Map_Tools" },
+  { key: "tool_CustomerFilter", label: "Customer Fault Filter", group: "Right Sidebar Tab", tab: "tab_Filter" },
+  { key: "tool_CustomerInactiveFilter", label: "Inactive Customer Filter", group: "Right Sidebar Tab", tab: "tab_Filter" },
+  { key: "tool_OLT_Customer", label: "OLT Filter", group: "Right Sidebar Tab", tab: "tab_Filter" },
+  { 
+  key: "tool_AlarmAnalytics", 
+  label: "Alarm Diagnostics", 
+  group: "Right Sidebar Tab", 
+  tab: "tab_Filter" 
+  }
 ];
 
 export default function RightSidebar() {
@@ -288,6 +323,13 @@ export default function RightSidebar() {
           return <LonghaulStyle feature={popupFeature} />;
         case "fat":
           return <FatDetails feature={popupFeature} />;
+       /*  case "Alarm_Analytics_WFS":
+          return (
+            <AnalyticsRecordPopup
+              record={popupFeature.attributes}
+              reportType={popupFeature.attributes.__reportType || "summaryByAlias"}
+            />
+          ); */
         default:
           return <div>No renderer found</div>;
       }
@@ -465,6 +507,14 @@ export default function RightSidebar() {
               <CalciteBlock heading="OLT Wise Customer" collapsible close>
                 <div style={{ padding: "1rem" }}>
                   <OLTCustomer />
+                </div>
+              </CalciteBlock>
+            </FeatureGuard>
+
+            <FeatureGuard featureKey="tool_AlarmAnalytics">
+              <CalciteBlock heading="Alarm Analytics" collapsible close>
+                <div style={{ padding: "1rem" }}>
+                  <AlarmAnalyticsFilter />
                 </div>
               </CalciteBlock>
             </FeatureGuard>

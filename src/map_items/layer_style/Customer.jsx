@@ -32,7 +32,7 @@ export default function Customer() {
     const valueExpression = `
       var name = $feature.alarmstate;
       var cat = $feature.service_tier;
-      var week = $feature.lastdowntime;
+      var week = $feature.fault_time;
       var severity = Lower($feature.perceived_severity); // Normalized to lowercase to handle any casing gaps
       
       When(

@@ -59,10 +59,16 @@ export default function Login() {
     
     if (loginResult.success) {
       const userRole = loginResult.data.role;
-      const targetRoute = routeConfig.find(
-        (route) => route.allowedRoles && route.allowedRoles.includes(userRole),
-      );
-      const path = targetRoute ? targetRoute.path : "/";
+      
+      // PROFESSIONAL RBAC ROUTING:
+      // We no longer rely on a hardcoded 'allowedRoles' array.
+      // If they are an admin, send them to the admin panel.
+      // If they are ANY other role (new or old), send them to the main dashboard.
+      // The features they can actually see on the dashboard are safely controlled by 
+      // the JSON permissions payload you configured in the Admin Panel.
+      
+      const path = userRole === 'admin' ? '/admin' : '/dashboard';
+      
       navigate(path, { replace: true });
     } else {
       setError(loginResult.message || "Invalid credentials");
