@@ -51,7 +51,7 @@ export default function LeftSidebar() {
   // We use useMemo and localeCompare to create an A-Z sorted copy of the regions.
   const REGIONS = useMemo(() => {
     const userRegions = user?.permissions?.regions ?? [];
-    return [...userRegions].sort((a, b) => a.localeCompare(b));
+    return [...userRegions].sort((a, b) => b.localeCompare(a)); // Currently Descending Order
   }, [user?.permissions?.regions]);
 
   // Dynamically filter available actions based on user permissions

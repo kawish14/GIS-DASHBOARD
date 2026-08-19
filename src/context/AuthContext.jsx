@@ -21,14 +21,18 @@ export function AuthProvider({ children }) {
   }, [user, layerNames]);
 
   const checkSession = useCallback(async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     try {
-      const res = await fetch(`${authenticate}/user/me`, { credentials: "include" });
+      const res = await fetch(`${authenticate}/user/me`, {
+        credentials: "include",
+        signal: controller.signal,
+      });
 
       if (!res.ok) {
-        if (userRef.current !== null) {
-          setUser(null);
-          setLayerNames([]);
-        }
+        setUser(null);
+        setLayerNames([]);
         return;
       }
 
@@ -45,7 +49,10 @@ export function AuthProvider({ children }) {
 
     } catch (err) {
       console.error("Session check failed", err);
+      setUser(null);
+      setLayerNames([]);
     } finally {
+      clearTimeout(timeoutId);
       setIsAuthReady(true);
     }
   }, []);
@@ -80,6 +87,17 @@ export function AuthProvider({ children }) {
     const sessionInterval = setInterval(() => checkSession(), 10 * 60 * 1000);
     return () => clearInterval(sessionInterval);
   }, [checkSession]);
+
+  // Watchdog: in rare cases the session check can stall (network/CORS/service down)
+  // which would leave `isAuthReady` false and the app stuck on a blank loader.
+  // Ensure we mark auth as ready after a timeout so the login screen can appear.
+  useEffect(() => {
+    const watchdog = setTimeout(() => {
+      setIsAuthReady(true);
+    }, 12 * 1000); // 12 seconds
+
+    return () => clearTimeout(watchdog);
+  }, []);
 
   useEffect(() => {
     // Throttle activity to prevent CPU spikes on mousemove
@@ -129,7 +147,8 @@ export function AuthProvider({ children }) {
 
   const authValue = useMemo(() => ({
     user, login, logout, isAuthenticated: !!user, isAuthReady, hasPermission, layerNames,
-  }), [user, isAuthReady, layerNames, logout, hasPermission, login]);
+    checkSession
+  }), [user, isAuthReady, layerNames, logout, hasPermission, login, checkSession]);
 
   return (
     <AuthContext.Provider value={authValue}>

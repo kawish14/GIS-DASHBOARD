@@ -7,7 +7,7 @@ import { routeConfig } from "./routes/route";
 // ✅ Root redirect component
 function RootRedirect() {
   const { isAuthenticated, isAuthReady } = useAuth();
-  if (!isAuthReady) return <calcite-loader label="Loading..." />;
+  if (!isAuthReady) return <FallbackLoader label="Loading..." />;
   return <Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />;
 }
 
@@ -15,7 +15,7 @@ function App() {
   const { isAuthReady } = useAuth();
 
   if (!isAuthReady) {
-    return <calcite-loader label="Adjusting polygons..."></calcite-loader>;
+    return <FallbackLoader label="Adjusting polygons..." />;
   }
 
   return (
@@ -46,3 +46,19 @@ function App() {
 }
 
 export default App;
+
+// Small loader component that prefers the `calcite-loader` webcomponent but
+// falls back to a native spinner if the custom element isn't registered.
+function FallbackLoader({ label }) {
+  const loaderAvailable = typeof customElements !== 'undefined' && customElements.get && customElements.get('calcite-loader');
+  if (loaderAvailable) return <calcite-loader label={label} />;
+
+  return (
+    <div className="min-h-screen w-full bg-[#0f1115] flex items-center justify-center p-4">
+      <div className="flex items-center gap-4">
+        <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+        <div className="text-white">{label || 'Loading...'}</div>
+      </div>
+    </div>
+  );
+}

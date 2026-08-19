@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Realtime } from "../../../../url";
+import { Realtime, api } from "../../../../url";
 import {
   CalciteList,
   CalciteListItem,
@@ -11,7 +11,6 @@ import {
   CalciteAction,
   CalciteAlert
 } from "@esri/calcite-components-react";
-import { api } from "../../../../url";
 import { useMapView, useLayers, usePopup } from "../../../context/MapContext";
 import { escapeForCql } from "../../../constants/faultCodes";
 
@@ -119,7 +118,7 @@ const fieldsToDisplay = [
   { key: "slot", label: "Slot", group: "Active Infrastructure" },
   { key: "port", label: "Port", group: "Active Infrastructure" },
   { key: "ontid", label: "ONT", group: "Active Infrastructure" },
-  { key: "dc_id", label: "DC / ODB", group: "Passive Elements", isLink: true },
+  { key: "dc_id", label: "DC / ODB", group: "Passive Elements", isLink: false },
   { key: "alarminfo", label: "Current Alarm", group: "Diagnostics" },
   { key: "lastdowncause", label: "Last Down Cause", group: "Diagnostics" },
   { key: "lastdowntime", label: "Down Time", group: "Diagnostics" },
@@ -143,15 +142,16 @@ export default function CustomerDetails({ feature }) {
 
   const currentAlarmState = parseInt(data.alarmstate, 10);
   const status = getSystemStatus(currentAlarmState);
-  const faultTime = data?.fault_time;
+  
+  const faultTime = currentAlarmState === 0 ? data?.fault_time_clear : data?.fault_time;
   const faultCategory = data?.category;
   const durationStr = getFaultDuration(faultTime, faultCategory);
 
   useEffect(() => {
-    if (!faultTime || faultCategory !== "fault") return;
+    if (!faultTime || faultCategory !== "fault" || currentAlarmState === 0) return;
     const intervalId = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(intervalId);
-  }, [faultTime, faultCategory]);
+  }, [faultTime, faultCategory, currentAlarmState]);
   void now;
 
   const handleDcClick = async (dc_id) => {
@@ -182,7 +182,7 @@ export default function CustomerDetails({ feature }) {
     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     const fetchPower = async (alarmState) => {
-      if (![1, 2, 3, 4].includes(alarmState)) return;
+      if (![0, 1, 2, 3, 4].includes(alarmState)) return;
 
       setPowerLoading(true);
       try {
@@ -232,6 +232,7 @@ export default function CustomerDetails({ feature }) {
           "lastuptime",
           "alarmstate",
           "fault_time",
+          "fault_time_clear", 
           "category",
           "perceived_severity",
           "lopdetail"
@@ -331,13 +332,22 @@ export default function CustomerDetails({ feature }) {
     { key: "biasText", label: "Tx Bias Current", value: powerInfo.biasText, color: powerInfo.biasKind },
   ] : [];
 
-  // Adjusted Logic: Filter metrics and LOP Cause visibility based on alarm state
-  const isRxOnlyAlarm = currentAlarmState === 1 || currentAlarmState === 2; // Power Off (1) or Linked Down (2)
-  const rxOnlyKeys = ["ontText", "oltText"];
+  // =========================================================================
+  // 🚨 HIGHLIGHT: CONDITION FOR SHOWING ONLY POWER VALUES WRITTEN HERE 🚨
+  // Added `currentAlarmState === 0` to the condition.
+  // When the state is 0 (Cleared), 1 (Power Off), or 2 (Linked Down),
+  // we filter the optical metrics to only show Rx power metrics.
+  // Temperature, voltage, and bias current are ignored.
+  // =========================================================================
+  const isPowerOnlyState = currentAlarmState === 0 || currentAlarmState === 1 || currentAlarmState === 2;
+  const powerOnlyKeys = ["ontText", "oltText"]; 
   
-  const displayedMetrics = isRxOnlyAlarm
-    ? opticalMetrics.filter((m) => rxOnlyKeys.includes(m.key))
+  const displayedMetrics = isPowerOnlyState
+    ? opticalMetrics.filter((m) => powerOnlyKeys.includes(m.key))
     : opticalMetrics;
+  // =========================================================================
+  // 🚨 END HIGHLIGHT 🚨
+  // =========================================================================
 
   const handleCopy = (e) => {
     e.stopPropagation();
@@ -433,8 +443,8 @@ export default function CustomerDetails({ feature }) {
             )}
           </div>
 
-          {/* 1. Separated Optical Diagnostics Panel (Rendered for any active alert: 1-4) */}
-          {[1, 2, 3, 4].includes(currentAlarmState) && (
+          {/* 1. Separated Optical Diagnostics Panel */}
+          {[0, 1, 2, 3, 4].includes(currentAlarmState) && (
             <div style={{ padding: "0 1rem 1rem", background: SURFACE.panelBg }}>
               <div style={{ fontSize: "0.62rem", fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: SURFACE.label, marginBottom: "0.75rem", borderBottom: `1px solid ${SURFACE.border}`, paddingBottom: "0.25rem" }}>
                 Real-time Optical Metrics
@@ -459,8 +469,8 @@ export default function CustomerDetails({ feature }) {
               </div>
               )}
 
-              {/* LOP Detail rendered ONLY if it is not a Linked Down / Power Off alarm */}
-              {!isRxOnlyAlarm && (
+              {/* LOP Detail rendered ONLY if it is not a Linked Down, Power Off, or Cleared alarm */}
+              {!isPowerOnlyState && (
                 <div style={{ 
                   marginTop: "0.5rem", background: SURFACE.cardBg, border: `1px solid ${SURFACE.border}`, 
                   borderLeft: `3px solid ${NATIVE.warn}`, borderRadius: "5px", padding: "0.5rem 0.75rem", 

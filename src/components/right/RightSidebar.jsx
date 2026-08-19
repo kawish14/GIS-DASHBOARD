@@ -12,13 +12,13 @@ import FeatureGuard from "../auth/FeatureGuard";
 import { useAuth } from "../../context/AuthContext";
 import { usePopup, useMapView } from "../../context/MapContext";
 import LayerListSidebar  from '../../map_items/widgets/layerlist/LayerListSidebar';
-import BaseMap  from '../../map_items/widgets/BaseMap';
+import BaseMap  from '../../map_items/widgets/map_tools/BaseMap';
 //import SearchWidget  from '../../map_items/widgets/SearchWidget';
-import SelectionWidget from '../../map_items/widgets/SelectionWidget';
+import SelectionWidget from '../../map_items/widgets/map_tools/SelectionWidget';
 import CustomerDetails from './popup/CustomerDetails';
 import PopDetails from './popup/PopDetails';
 import DcDetails from "./popup/DcDetails";
-import CustomerFilter from '../../map_items/widgets/customer/CustomerFilter';
+import CustomerFilter from '../../map_items/widgets/filter/CustomerFilter';
 import FeederDetails from "./popup/FeederDetails";
 import DistributionDetails from "./popup/DistributionDetails";
 import JCDetail from "./popup/JCDetails";
@@ -27,15 +27,16 @@ import VehicleDetails from "./popup/VehicleDetails";
 import Sites from "./popup/Sites";
 import LonghaulStyle from "./popup/LonghaulStyle";
 import ParcelDetails from "./popup/ParcelDetails";
-import CustomerInactiveFilter from '../../map_items/widgets/customer/CustomerInactiveFilter';
-import DensityMapToggle from '../../map_items/widgets/customer/DensityMapToggle';
-import HeatmapToggle from '../../map_items/widgets/customer/HeatmapToggle';
-import ChatWidget from "../../map_items/widgets/ChatWidget";
+import FSPOutageAnalyzer from '../../map_items/widgets/map_tools/FSPOutageAnalyzer';
+import CustomerInactiveFilter from '../../map_items/widgets/filter/CustomerInactiveFilter';
+import DensityMapToggle from '../../map_items/widgets/map_tools/DensityMapToggle';
+import HeatmapToggle from '../../map_items/widgets/filter/HeatmapToggle';
+//import ChatWidget from "../../map_items/widgets/ChatWidget";
 import InactiveClusterPopup from './popup/InactiveClusterPopup';
 import InactiveCustomerDetails from './popup/InactiveCustomerDetails';
-import OLTCustomer from '../../map_items/widgets/customer/OLTCustomer';
-import AlarmAnalyticsFilter from "../../map_items/widgets/customer/AlarmAnalyticsFilter";
-import AnalyticsRecordPopup from "./popup/AnalyticsRecordPopup";
+import OLTCustomer from '../../map_items/widgets/filter/OLTCustomer';
+import AlarmAnalyticsFilter from "../../map_items/widgets/filter/AlarmAnalyticsFilter";
+
 
 // Mapped exactly to your new DB Keys
 const ACTIONS = [
@@ -77,6 +78,12 @@ export const featureMeta = [
   label: "Alarm Diagnostics", 
   group: "Right Sidebar Tab", 
   tab: "tab_Filter" 
+  },
+  {
+    key: "tool_FSPAnalyzer",
+    label:"Root Cause Analyzer",
+    group:"Right Sidebar Tab",
+    tab:"tab_Map_Tools"
   }
 ];
 
@@ -323,13 +330,6 @@ export default function RightSidebar() {
           return <LonghaulStyle feature={popupFeature} />;
         case "fat":
           return <FatDetails feature={popupFeature} />;
-       /*  case "Alarm_Analytics_WFS":
-          return (
-            <AnalyticsRecordPopup
-              record={popupFeature.attributes}
-              reportType={popupFeature.attributes.__reportType || "summaryByAlias"}
-            />
-          ); */
         default:
           return <div>No renderer found</div>;
       }
@@ -358,7 +358,11 @@ export default function RightSidebar() {
       id="shell-panel-end"
       collapsed={isCollapsed}
       displayMode="dock"
-      style={{ contain: "layout style", willChange: "width", isolation: "isolate" }}
+      style={{
+        contain: "layout style",
+        willChange: "width",
+        isolation: "isolate",
+      }}
     >
       <CalciteActionBar slot="action-bar">
         {permittedActions.map((action) => (
@@ -366,7 +370,9 @@ export default function RightSidebar() {
             key={action.text}
             text={action.text}
             icon={action.icon}
-            active={!isCollapsed && activeTool === action.text ? true : undefined}
+            active={
+              !isCollapsed && activeTool === action.text ? true : undefined
+            }
             onClick={() => handleActionClick(action.text)}
           />
         ))}
@@ -380,12 +386,17 @@ export default function RightSidebar() {
         -- this fight between imperative and declarative state is what
         produced the open/close flicker on this panel.
       */}
-      <CalcitePanel ref={panelRef} heading={activeTool} closable onCalcitePanelClose={handlePanelClose} closed={isCollapsed}>
-
+      <CalcitePanel
+        ref={panelRef}
+        heading={activeTool}
+        closable
+        onCalcitePanelClose={handlePanelClose}
+        closed={isCollapsed}
+      >
         {/* --- DETAILS TAB --- */}
         <FeatureGuard featureKey="tab_Details">
           <div style={{ display: activeTool === "Details" ? "block" : "none" }}>
-           {/*  <SearchWidget />  */}
+            {/*  <SearchWidget />  */}
 
             {/* ArcGIS Pro-style "Identify" tab strip: one tab per lookup in
                 the chain (Customer -> DC -> POP). Switching tabs never
@@ -403,8 +414,11 @@ export default function RightSidebar() {
               >
                 {selectionStack.map((entry, idx) => {
                   const isActive = entry.id === activeSelectionId;
-                  const idLabel = entry.feature?.attributes?.id ?? entry.feature?.attributes?.name ?? "";
-                  console.log(entry)
+                  const idLabel =
+                    entry.feature?.attributes?.id ??
+                    entry.feature?.attributes?.name ??
+                    "";
+                  console.log(entry);
                   return (
                     <div
                       key={entry.id}
@@ -418,16 +432,27 @@ export default function RightSidebar() {
                         cursor: "pointer",
                         fontSize: "0.72rem",
                         whiteSpace: "nowrap",
-                        background: isActive ? "var(--calcite-ui-brand)" : "var(--calcite-ui-foreground-2)",
+                        background: isActive
+                          ? "var(--calcite-ui-brand)"
+                          : "var(--calcite-ui-foreground-2)",
                         color: isActive ? "#fff" : "var(--calcite-ui-text-1)",
                       }}
                     >
-                      <span>[{idx + 1}] {entry.label=== 'Customers_test' ? 'Customers' : entry.label}{idLabel ? `: ${idLabel}` : ""}</span>
+                      <span>
+                        [{idx + 1}]{" "}
+                        {entry.label === "Customers_test"
+                          ? "Customers"
+                          : entry.label}
+                        {idLabel ? `: ${idLabel}` : ""}
+                      </span>
                       <CalciteAction
                         scale="s"
                         icon="x"
                         appearance="transparent"
-                        onClick={(e) => { e.stopPropagation(); closeSelection(entry.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          closeSelection(entry.id);
+                        }}
                       />
                     </div>
                   );
@@ -450,8 +475,9 @@ export default function RightSidebar() {
 
         {/* --- MAP TOOLS TAB --- */}
         <FeatureGuard featureKey="tab_Map_Tools">
-          <div style={{ display: activeTool === "Map Tools" ? "block" : "none" }}>
-
+          <div
+            style={{ display: activeTool === "Map Tools" ? "block" : "none" }}
+          >
             <FeatureGuard featureKey="tool_base_map">
               <CalciteBlock heading="Base Map" collapsible close>
                 <BaseMap />
@@ -472,23 +498,33 @@ export default function RightSidebar() {
               </CalciteBlock>
             </FeatureGuard>
 
-           {/*   <FeatureGuard featureKey="tool_heatMap">
+            <FeatureGuard featureKey="tool_FSPAnalyzer">
+              <CalciteBlock heading="Root Cause Analyzer (FSP)" collapsible close>
+                <div style={{ padding: "1rem" }}>
+                  <FSPOutageAnalyzer />
+                </div>
+              </CalciteBlock>
+            </FeatureGuard>
+
+            {/*   <FeatureGuard featureKey="tool_heatMap">
               <CalciteBlock heading="Heatmap" collapsible open>
                 <div style={{ padding: "1rem" }}>
                   <HeatmapToggle />
                 </div>
               </CalciteBlock>
             </FeatureGuard> */}
-
           </div>
         </FeatureGuard>
 
         {/* --- FILTER TAB --- */}
         <FeatureGuard featureKey="tab_Filter">
           <div style={{ display: activeTool === "Filter" ? "block" : "none" }}>
-
             <FeatureGuard featureKey="tool_CustomerFilter">
-              <CalciteBlock heading="Customer Faults Duration" collapsible close>
+              <CalciteBlock
+                heading="Customer Faults Duration"
+                collapsible
+                close
+              >
                 <div style={{ padding: "1rem" }}>
                   <CustomerFilter />
                 </div>
@@ -518,7 +554,6 @@ export default function RightSidebar() {
                 </div>
               </CalciteBlock>
             </FeatureGuard>
-
           </div>
         </FeatureGuard>
 
@@ -528,7 +563,6 @@ export default function RightSidebar() {
             <ChatWidget view={view} />
           </div>
         </FeatureGuard> */}
-
       </CalcitePanel>
     </CalciteShellPanel>
   );

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   CalciteAction,
   CalciteBlock,
@@ -20,6 +20,17 @@ const COLORS = {
   LOP: "#ffc933",
   Other: "#6a6a6a"
 };
+
+// --- Configured Fields Array ---
+const fieldsToDisplay = [
+  { key: "id", label: "ID" },
+  // { key: "name", label: "Name" },
+  { key: "pop_id", label: "POP", isLink: false },
+  { key: "type", label: "Type" },
+  { key: "placement", label: "Placement" },
+  { key: "area", label: "Area" },
+  { key: "city", label: "City" },
+];
 
 // --- Sub-components ---
 
@@ -258,21 +269,11 @@ export default function DcDetail({ feature }) {
       }
   };
 
-  const fields = useMemo(() => [
-      { label: "ID", value: attr.id },
-      /* { label: "Name", value: attr.name }, */
-      { label: "POP", value: attr.pop_id, isLink: true },
-      { label: "Type", value: attr.type },
-      { label: "Placement", value: attr.placement },
-      { label: "Area", value: attr.area },
-      { label: "City", value: attr.city },
-    ], [attr]);
-
-    const selectionStyle = {
-        userSelect: "text", 
-        WebkitUserSelect: "text", // For Safari/Chrome compatibility
-        cursor: "text"
-    };
+  const selectionStyle = {
+      userSelect: "text", 
+      WebkitUserSelect: "text", // For Safari/Chrome compatibility
+      cursor: "text"
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: "2px" }}>
@@ -280,21 +281,25 @@ export default function DcDetail({ feature }) {
       {/* DC Details Block */}
       <CalciteBlock heading={`DC ${attr.id}`} description={`${attr.name}`} open collapsible={false}>
          <CalciteList selectionMode="none">
-          {fields.map((field, index) => (
-             <CalciteListItem key={index} scale="s" label={field.label}>
-               <div slot="content-end" style={{ display: "flex", alignItems: "center", marginLeft: "1rem" }}>
-                 <span style={{ fontSize: "0.75rem", fontWeight: "600", ...selectionStyle }}>{field.value}</span>
-                 {field.isLink && field.value && (
-                   <CalciteAction scale="s" icon="launch" onClick={() => handlePopClick(field.value)} />
-                 )}
-               </div>
-             </CalciteListItem>
-          ))}
+          {fieldsToDisplay.map((field) => {
+            const val = attr[field.key] ?? attr[field.key.toLowerCase()] ?? "N/A";
+            
+            return (
+              <CalciteListItem key={field.key} scale="s" label={field.label}>
+                <div slot="content-end" style={{ display: "flex", alignItems: "center", marginLeft: "1rem" }}>
+                  <span style={{ fontSize: "0.75rem", fontWeight: "600", ...selectionStyle }}>{val}</span>
+                  {field.isLink && val !== "N/A" && (
+                    <CalciteAction scale="s" icon="launch" onClick={() => handlePopClick(val)} />
+                  )}
+                </div>
+              </CalciteListItem>
+            );
+          })}
          </CalciteList>
       </CalciteBlock>
 
       {/* --- NEW: Splitter Details Block --- */}
-      {!loading && splitters.length > 0 && (
+     {/*  {!loading && splitters.length > 0 && (
         <CalciteBlock heading="Splitter Details" open collapsible scale="s">
           <div slot="icon"><CalciteIcon icon="network" scale="s" /></div>
           <CalciteList selectionMode="none">
@@ -309,7 +314,7 @@ export default function DcDetail({ feature }) {
                   <div style={{ color: "var(--calcite-ui-text-1)" }}>
                     <b>Pri FSP:</b> {split.primary_fsp || 'N/A'}
                   </div>
-                  {/* Only render Secondary FSP if it exists */}
+       
                   {split.secondary_fsp && (
                     <div style={{ color: "var(--calcite-ui-text-2)", marginTop: "2px" }}>
                       <b>Sec FSP:</b> {split.secondary_fsp}
@@ -321,7 +326,7 @@ export default function DcDetail({ feature }) {
             ))}
           </CalciteList>
         </CalciteBlock>
-      )}
+      )} */}
 
       {/* Analytics Block */}
       <CalciteBlock heading="Fault Status" open collapsible scale="s">

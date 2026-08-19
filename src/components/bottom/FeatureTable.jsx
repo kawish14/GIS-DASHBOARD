@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo , useRef} from "react";
 import { useArcGIS } from "../../context/MapContext";
 import { CalciteButton } from "@esri/calcite-components-react";
 import { api, authenticate } from "../../../url";
-import { analyticsColumns } from "../../constants/columns";
+import { analyticsColumns, customerColumns } from "../../constants/columns";
+import Graphic from "@arcgis/core/Graphic";
 
 // ---------------------------------------------------------------------------
 // Helper: automatically generate column definitions from feature attributes
@@ -67,18 +68,32 @@ export default function FeatureTable() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [selectedRowId, setSelectedRowId] = useState(null);
+  const tabRefs = useRef({});
 
   // 1. Manage Active Tabs dynamically
   const availableTabs = Object.keys(tableData || {}).filter(key => tableData[key].isVisible);
-
+  const prevTabsLengthRef = useRef(availableTabs.length);
 
   useEffect(() => {
-    if (availableTabs.length > 0 && !availableTabs.includes(activeTabId)) {
-      setActiveTabId(availableTabs[availableTabs.length - 1]); 
+    // New tabs are appended after existing ones (object insertion order),
+    // so the newly opened tab is the LAST entry, not the first — activate
+    // that one instead of snapping back to the original/main tab.
+    if (availableTabs.length > prevTabsLengthRef.current) {
+      setActiveTabId(availableTabs[availableTabs.length - 1]);
+    } else if (availableTabs.length > 0 && !availableTabs.includes(activeTabId)) {
+      setActiveTabId(availableTabs[0]); 
     } else if (availableTabs.length === 0) {
       setActiveTabId(null);
     }
+    prevTabsLengthRef.current = availableTabs.length;
   }, [tableData, availableTabs, activeTabId]);
+
+  // Keep the active tab visible when the tab bar overflows horizontally —
+  // otherwise a tab correctly opened "on the right" can still be scrolled
+  // out of view.
+  useEffect(() => {
+    tabRefs.current[activeTabId]?.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
+  }, [activeTabId]);
 
   // 2. Resolve current features & columns based on active tab
   const currentTabData = tableData?.[activeTabId];
@@ -230,48 +245,163 @@ export default function FeatureTable() {
   // ---------------------------------------------------------------------------
   // Zoom to feature
   // ---------------------------------------------------------------------------
+
   const mapLocate = async (id) => {
     setSelectedRowId(id);
     try {
-      if (features && features.length > 0) {
-        const targetFeature = features.find((f) => f.attributes?.id === id);
-        if (!targetFeature) return;
+      if (!features || features.length === 0) return;
+      
+      const targetFeature = features.find((f) => f.attributes?.id === id);
+      if (!targetFeature) return;
 
-        if (targetFeature.geometry) {
-          view.goTo({ target: targetFeature, zoom: 22 }).catch((err) => {
-            if (err.name !== "AbortError" && err.name !== "view:goto-interrupted") {
-              console.error("Zoom failed:", err);
-            }
-          });
-          return;
-        }
+      const attr = targetFeature.attributes;
+      
+      // 1. Clear any existing highlights from previous clicks
+      view.graphics.removeAll();
 
-        const alias = targetFeature.attributes?.alias;
-        if (alias) {
-          const customerLayer = layers?.Customers_test;
-          if (customerLayer) {
-            const query = customerLayer.createQuery();
-            query.where = `alias = '${alias.replace(/'/g, "''")}'`;
-            query.returnGeometry = true;
-            query.outFields = ["id"];
-            const results = await customerLayer.queryFeatures(query);
-            if (results.features.length > 0) {
-              view.goTo({ target: results.features[0], zoom: 22 }).catch((err) => {
-                if (err.name !== "AbortError" && err.name !== "view:goto-interrupted") {
-                  console.error("Zoom failed:", err);
-                }
+      // ========================================================
+      // SCENARIO A: ZONE CLICK (Spatial Vulnerability)
+      // ========================================================
+      if (attr.zone) {
+        const zoneLayer = layers?.zones;
+        const customerLayer = layers?.Customers_test;
+
+        if (zoneLayer) {
+            const zoneQuery = zoneLayer.createQuery();
+            zoneQuery.where = `zone = '${attr.zone.replace(/'/g, "''")}' and region = '${attr.region.replace(/'/g, "''")}'`;
+            zoneQuery.returnGeometry = true;
+            
+            const zoneResults = await zoneLayer.queryFeatures(zoneQuery);
+            
+            if (zoneResults.features.length > 0) {
+              // 1. Zoom to ALL features belonging to this zone so the extent covers everything
+              view.goTo({ target: zoneResults.features, padding: [50, 50, 50, 50] }).catch((err) => {
+                if (err.name !== "AbortError" && err.name !== "view:goto-interrupted") console.error("Zoom failed:", err);
               });
+
+              // 2. Highlight EVERY polygon piece associated with this zone
+              const zoneGraphics = zoneResults.features.map(zoneFeature => new Graphic({
+                geometry: zoneFeature.geometry,
+                symbol: {
+                  type: "simple-fill",
+                  color: [0, 255, 255, 0.1], 
+                  outline: { color: [0, 255, 255, 1], width: 2 }
+                }
+              }));
+              
+              view.graphics.addMany(zoneGraphics);
+
+              // 3. Highlight EXACT customers provided by the backend aggregation
+              if (customerLayer && attr.affected_aliases && attr.affected_aliases.length > 0) {
+                const safeAliases = attr.affected_aliases.map(a => `'${a.replace(/'/g, "''")}'`).join(",");
+                
+                // To check intersection across multi-part zone features safely, we query using the zone names or the collective geometries, 
+                // but since the backend already gave us the exact alias array, matching by alias alone within this zone is secure.
+                const custQuery = customerLayer.createQuery();
+                custQuery.where = `alias IN (${safeAliases})`;
+                custQuery.returnGeometry = true;
+                
+                const custResults = await customerLayer.queryFeatures(custQuery);
+                
+                const alarmGraphics = custResults.features.map(f => new Graphic({
+                  geometry: f.geometry,
+                  symbol: {
+                    type: "simple-marker",
+                    style: "circle",
+                    color: [255, 170, 0, 0.4], 
+                    size: "18px",
+                    outline: { color: [255, 170, 0, 1], width: 2 }
+                  }
+                }));
+                
+                view.graphics.addMany(alarmGraphics);
+              }
             }
           }
+        return; 
+      }
+
+      // ========================================================
+      // SCENARIO B: INDIVIDUAL CUSTOMER CLICK (Alias / Port)
+      // ========================================================
+      let targetGeom = null;
+
+      if (targetFeature.geometry) {
+        targetGeom = targetFeature.geometry;
+      } else if (attr.alias) {
+        const customerLayer = layers?.Customers_test;
+        if (customerLayer) {
+          const query = customerLayer.createQuery();
+          query.where = `alias = '${attr.alias.replace(/'/g, "''")}'`;
+          query.returnGeometry = true;
+          
+          const results = await customerLayer.queryFeatures(query);
+          if (results.features.length > 0) targetGeom = results.features[0].geometry;
         }
       }
+
+      if (targetGeom) {
+        view.goTo({ target: targetGeom, zoom: 22 }).catch((err) => {
+          if (err.name !== "AbortError" && err.name !== "view:goto-interrupted") console.error("Zoom failed:", err);
+        });
+
+        view.graphics.add(new Graphic({
+          geometry: targetGeom,
+          symbol: {
+            type: "simple-marker",
+            style: "circle",
+            color: [0, 255, 255, 0.3], 
+            size: "20px", 
+            outline: { color: [0, 255, 255, 1], width: 2 }
+          }
+        }));
+      }
+
     } catch (error) {
-      console.error("Error zooming to feature:", error);
+      console.error("Error zooming/highlighting feature:", error);
+    }
+  };
+
+  // Handler to open a sub-table tab for zone customers
+  const handleViewZoneCustomers = async (e, attr) => {
+    e.stopPropagation(); // Prevents triggering the row zoom event
+    if (!attr.affected_aliases || attr.affected_aliases.length === 0) return;
+
+    const customerLayer = layers?.Customers_test;
+    if (!customerLayer) {
+      alert("Customer layer not available.");
+      return;
+    }
+
+    try {
+      const safeAliases = attr.affected_aliases.map(a => `'${a.replace(/'/g, "''")}'`).join(",");
+      const query = customerLayer.createQuery();
+      query.where = `alias IN (${safeAliases})`;
+      query.returnGeometry = true;
+      query.outFields = ["*"];
+
+      const results = await customerLayer.queryFeatures(query);
+
+      // Format features for the table structure
+      const formattedFeatures = results.features.map((f, idx) => ({
+        attributes: { id: f.attributes.alias || f.attributes.id || idx, ...f.attributes },
+        geometry: f.geometry
+      }));
+
+      const tabId = `zone_customers_${attr.zone.replace(/\s+/g, "_")}`;
+      const tabLabel = `Zone: ${attr.zone} (${formattedFeatures.length} Customers)`;
+
+      // Open new tab using your existing multi-tab context function
+      addTableData(tabId, tabLabel, formattedFeatures, customerColumns);
+    } catch (err) {
+      console.error("Failed to load zone customers:", err);
+      alert("Could not load customer list for this zone.");
     }
   };
 
   const handleCloseTable = () => {
     hideAllTables();
+    if (view?.graphics) view.graphics.removeAll(); // <--- Clears map graphics when closing all tables
     if (highlightHandleRef.current) {
       highlightHandleRef.current.remove();
       highlightHandleRef.current = null;
@@ -299,6 +429,7 @@ export default function FeatureTable() {
         {availableTabs.map((tabId) => (
           <button
             key={tabId}
+            ref={(el) => { tabRefs.current[tabId] = el; }}
             onClick={() => setActiveTabId(tabId)}
             className={`px-4 py-1.5 text-xs font-semibold transition-colors border-b-2 whitespace-nowrap flex items-center ${
               activeTabId === tabId 
@@ -425,6 +556,21 @@ export default function FeatureTable() {
                           }`}
                         >
                           {attr.id}
+                        </td>
+                      );
+                    }
+
+                    // --- NEW: Interactive button for Zone Customer List ---
+
+                    if (col.key === "affected_aliases" && attr.zone) {
+                      return (
+                        <td key={col.key} className="px-3 py-1 text-[11px]">
+                          <button
+                            onClick={(e) => handleViewZoneCustomers(e, attr)}
+                            className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                          >
+                            <span>🔍</span> View {attr.affected_aliases?.length || 0} Customers
+                          </button>
                         </td>
                       );
                     }
