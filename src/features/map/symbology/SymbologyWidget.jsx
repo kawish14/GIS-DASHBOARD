@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CalciteBlock,
   CalciteButton,
-  CalciteColorPicker,
   CalciteInputNumber,
-  CalciteLabel,
   CalciteLoader,
   CalciteNotice,
   CalciteOption,
-  CalcitePopover,
   CalciteSelect,
+  CalciteSlider,
   CalciteSwitch,
 } from "@esri/calcite-components-react";
 import { useLayers } from "../state/LayersContext";
@@ -22,10 +21,13 @@ import {
   isNumericField,
   symbolizableFields,
 } from "./classify";
-import { DEFAULT_MARKER_ICON, MARKER_ICONS, pictureSymbol } from "./markerIcons";
+import { DEFAULT_MARKER_ICON, pictureSymbol } from "./markerIcons";
+import { IconField, SwatchField } from "./pickers";
+import ClassList from "./ClassList";
+import Histogram from "./Histogram";
+import SymbolPreview from "./SymbolPreview";
 import {
   CATEGORICAL_SCHEMES,
-  CVD_SAFE_UNIQUE_CLASSES,
   DEFAULT_OTHER_COLOR,
   DEFAULT_SIMPLE_COLOR,
   MAX_UNIQUE_CLASSES,
@@ -47,20 +49,31 @@ import {
  *   symbologyPalettes.js   which colours, and why those (validated)
  *   buildRenderer.js       class list -> an ArcGIS renderer, already used by
  *                          SymbologyLayer.jsx for the server-side config
+ *   Histogram / SymbolPreview / ClassList   what the pane shows
  *
  * Producing the same config shape buildRenderer already understands is
  * deliberate: what the user builds here is exactly what could be saved into
  * symbology-config.json later, and there is one renderer builder, not two.
+ *
+ * READING THE FIELD vs BUILDING THE CLASSES are separate on purpose. The read
+ * is a queryFeatures over the whole layer and depends only on which layer and
+ * which column; everything downstream -- method, class count, palette, sizes,
+ * colours -- is a pure recompute over the values already in hand. Folding the
+ * two together meant nudging the symbol size re-queried a six-figure layer.
+ *
+ * Per-class edits live in `overrides`, keyed by class, so recomputing the
+ * classes keeps the colours and names the user chose instead of discarding
+ * them on the next slider drag.
  *
  * Scope: changes are live for the session and are NOT persisted -- a reload
  * restores whatever symbology-config.json says. See CODEBASE_GUIDE.md.
  */
 
 const PRIMARY_SYMBOLOGY = [
-  { id: "simple", name: "Single Symbol", needsField: false, numericOnly: false },
-  { id: "unique-value", name: "Unique Values", needsField: true, numericOnly: false },
-  { id: "graduated-color", name: "Graduated Colors", needsField: true, numericOnly: true },
-  { id: "graduated-symbol", name: "Graduated Symbols", needsField: true, numericOnly: true },
+  { id: "simple", name: "Single", hint: "One symbol for every feature", needsField: false, numericOnly: false },
+  { id: "unique-value", name: "Categories", hint: "A colour per distinct value", needsField: true, numericOnly: false },
+  { id: "graduated-color", name: "Colour ramp", hint: "Graduated colours across a number", needsField: true, numericOnly: true },
+  { id: "graduated-symbol", name: "Size ramp", hint: "Graduated symbol sizes across a number", needsField: true, numericOnly: true },
 ];
 
 // Only layers that can actually carry a renderer and answer a query.
@@ -68,6 +81,12 @@ const SYMBOLIZABLE_LAYER_TYPES = new Set(["feature", "geojson", "csv", "ogc-feat
 
 const MIN_SIZE = 4;
 const MAX_SIZE = 28;
+
+// Drawn instead of the class's own symbol when it is hidden. Transparent in
+// every channel buildSymbol might reach for, so it disappears for points,
+// lines and fills alike -- the features stay in the layer, so the feature
+// table and identify still see them.
+const HIDDEN_SYMBOL = { color: [0, 0, 0, 0], outlineColor: [0, 0, 0, 0], outlineWidth: 0, size: 1, width: 0 };
 
 export default function SymbologyWidget() {
   const { view } = useMapView();
@@ -82,7 +101,10 @@ export default function SymbologyWidget() {
   const [reverse, setReverse] = useState(false);
   const [size, setSize] = useState(8);
   const [outlineWidth, setOutlineWidth] = useState(0.5);
+  const [outlineColor, setOutlineColor] = useState("#ffffff");
   const [singleColor, setSingleColor] = useState(DEFAULT_SIMPLE_COLOR);
+  const [opacity, setOpacity] = useState(1);
+  const [sortBy, setSortBy] = useState("count");
 
   // Point layers are drawn with picture markers by default in this app, so the
   // widget can produce them too rather than only coloured shapes.
@@ -97,22 +119,23 @@ export default function SymbologyWidget() {
   const [hasEdits, setHasEdits] = useState(false);
 
   const [fields, setFields] = useState([]);
-  const [classes, setClasses] = useState([]);
-  const [foldedCount, setFoldedCount] = useState(0);
-  const [isBuilding, setIsBuilding] = useState(false);
+  const [rawValues, setRawValues] = useState([]);
+  const [overrides, setOverrides] = useState({});
+  const [hiddenKeys, setHiddenKeys] = useState(() => new Set());
+  const [isReading, setIsReading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Each layer's renderer as it was before this widget first touched it, so
-  // "Restore default" is a real restore and not a guess at the original.
-  const originalRenderers = useRef(new Map());
-  // Guards against an older, slower query overwriting a newer one's classes.
+  // Each layer's renderer and opacity as they were before this widget first
+  // touched them, so "Restore default" is a real restore, not a guess.
+  const originalStyles = useRef(new Map());
+  // Guards against an older, slower query overwriting a newer one's values.
   const queryToken = useRef(0);
 
   const symbolizableLayers = useMemo(
     () =>
       Object.entries(layers)
         .filter(([, layer]) => layer && SYMBOLIZABLE_LAYER_TYPES.has(layer.type))
-        .map(([id, layer]) => ({ id, title: layer.title || id })),
+        .map(([id, layer]) => ({ id, title: layer.title || id, geometryType: layer.geometryType })),
     [layers]
   );
 
@@ -124,6 +147,7 @@ export default function SymbologyWidget() {
   const selectedField = fields.find((f) => f.name === field) ?? null;
   const isGraduated = mode === "graduated-color" || mode === "graduated-symbol";
   const isPointLayer = ["point", "multipoint"].includes(layer?.geometryType);
+  const isLineLayer = layer?.geometryType === "polyline";
   // A colour ramp can't tint a picture, so graduated colours stay shapes.
   const allowsPictures = isPointLayer && mode !== "graduated-color";
   const usePictures = allowsPictures && symbolStyle === "picture";
@@ -168,105 +192,132 @@ export default function SymbologyWidget() {
     if (numeric) setField(numeric.name);
   }, [activeMode, fields, selectedField]);
 
-  /** Reads the column off the layer and rebuilds the class list. */
-  const rebuildClasses = useCallback(async () => {
-    setError(null);
-    setFoldedCount(0);
-
-    if (!layer || !activeMode) return;
-    if (mode === "simple") {
-      setClasses([]);
-      return;
+  // --- STEP 1: read the column. Only the layer and the field can trigger this.
+  useEffect(() => {
+    if (!layer || mode === "simple" || !field) {
+      setRawValues([]);
+      return undefined;
     }
-    if (!field) return;
-    if (activeMode.numericOnly && !isNumericField(selectedField)) {
-      setClasses([]);
-      setError("Graduated symbology needs a numeric field.");
-      return;
-    }
-
+    let active = true;
     const token = (queryToken.current += 1);
-    setIsBuilding(true);
-    try {
-      const query = layer.createQuery();
-      query.where = "1=1";
-      query.outFields = [field];
-      query.returnGeometry = false;
-      const { features } = await layer.queryFeatures(query);
-      if (token !== queryToken.current) return; // a newer request won
+    setIsReading(true);
+    setError(null);
 
-      const values = features.map((f) => f.attributes?.[field]);
-      const scheme = findScheme(schemeId) ?? schemes[0];
+    layer
+      .load()
+      .then(() => {
+        const query = layer.createQuery();
+        query.where = "1=1";
+        query.outFields = [field];
+        query.returnGeometry = false;
+        return layer.queryFeatures(query);
+      })
+      .then(({ features }) => {
+        if (!active || token !== queryToken.current) return; // a newer request won
+        setRawValues(features.map((f) => f.attributes?.[field]));
+      })
+      .catch((err) => {
+        if (active && token === queryToken.current) setError(`Could not read that field: ${err.message}`);
+      })
+      .finally(() => {
+        if (active && token === queryToken.current) setIsReading(false);
+      });
 
-      if (mode === "unique-value") {
-        const all = distinctValues(values);
-        const shown = all.slice(0, MAX_UNIQUE_CLASSES);
-        const colors = sampleScheme(scheme, shown.length, { reverse });
-        setFoldedCount(all.length - shown.length);
-        setClasses(
-          shown.map((entry, i) => ({
-            key: String(entry.value),
-            label: String(entry.value),
-            color: colors[i],
-            icon: MARKER_ICONS[i % MARKER_ICONS.length].url,
-            count: entry.count,
-            value: entry.value,
-          }))
-        );
-      } else {
-        const breaks = classifyBreaks(values, method, classCount);
-        if (breaks.length === 0) {
-          setClasses([]);
-          setError("That field has no numeric values to classify.");
-          return;
-        }
-        const colors = sampleScheme(scheme, breaks.length, { reverse });
-        const sizeStep = breaks.length > 1 ? (MAX_SIZE - MIN_SIZE) / (breaks.length - 1) : 0;
-        setClasses(
-          breaks.map((b, i) => ({
-            key: `${b.min}-${b.max}`,
-            label: `${formatNumber(b.min)} – ${formatNumber(b.max)}`,
-            // Graduated symbols hold one colour and vary size; graduated
-            // colours do the reverse. Both are class breaks underneath.
-            color: mode === "graduated-symbol" ? singleColor : colors[i],
-            size: mode === "graduated-symbol" ? Math.round(MIN_SIZE + i * sizeStep) : size,
-            icon: singleIcon,
-            count: b.count,
-            min: b.min,
-            max: b.max,
-          }))
-        );
+    return () => {
+      active = false;
+    };
+  }, [layer, field, mode]);
+
+  // --- STEP 2: classify. Pure, over values already in hand.
+  const { classes: computedClasses, foldedCount, numericValues } = useMemo(() => {
+    const empty = { classes: [], foldedCount: 0, numericValues: [] };
+    if (mode === "simple" || rawValues.length === 0) return empty;
+    if (activeMode?.numericOnly && !isNumericField(selectedField)) return empty;
+
+    const scheme = findScheme(schemeId) ?? schemes[0];
+
+    if (mode === "unique-value") {
+      const all = distinctValues(rawValues);
+      // Which values keep their own colour is decided by frequency -- the
+      // rarest are the ones folded into "Other" -- so the palette is assigned
+      // before any display sort, and re-sorting the list never recolours it.
+      const shown = all.slice(0, MAX_UNIQUE_CLASSES);
+      const colors = sampleScheme(scheme, shown.length, { reverse });
+      const built = shown.map((entry, i) => ({
+        key: String(entry.value),
+        label: String(entry.value),
+        color: colors[i],
+        size,
+        icon: singleIcon,
+        count: entry.count,
+        value: entry.value,
+      }));
+      if (sortBy === "value") {
+        built.sort((a, b) => String(a.value).localeCompare(String(b.value), undefined, { numeric: true }));
       }
-    } catch (err) {
-      if (token === queryToken.current) setError(`Could not read that field: ${err.message}`);
-    } finally {
-      if (token === queryToken.current) setIsBuilding(false);
+      return { classes: built, foldedCount: all.length - shown.length, numericValues: [] };
     }
+
+    const numbers = rawValues
+      .map((v) => (typeof v === "number" ? v : Number(v)))
+      .filter(Number.isFinite);
+    const breaks = classifyBreaks(rawValues, method, classCount);
+    if (breaks.length === 0) return { ...empty, numericValues: numbers };
+
+    const colors = sampleScheme(scheme, breaks.length, { reverse });
+    const sizeStep = breaks.length > 1 ? (size - MIN_SIZE) / (breaks.length - 1) : 0;
+    return {
+      classes: breaks.map((b, i) => ({
+        key: `${b.min}-${b.max}`,
+        label: `${formatNumber(b.min)} – ${formatNumber(b.max)}`,
+        // Graduated symbols hold one colour and vary size; graduated colours
+        // do the reverse. Both are class breaks underneath.
+        color: mode === "graduated-symbol" ? singleColor : colors[i],
+        size: mode === "graduated-symbol" ? Math.round(MIN_SIZE + i * sizeStep) : size,
+        icon: singleIcon,
+        count: b.count,
+        min: b.min,
+        max: b.max,
+      })),
+      foldedCount: 0,
+      numericValues: numbers,
+    };
   }, [
-    layer, activeMode, mode, field, selectedField, schemeId, schemes,
-    reverse, method, classCount, size, singleColor, singleIcon,
+    rawValues, mode, activeMode, selectedField, schemeId, schemes,
+    reverse, method, classCount, size, singleColor, singleIcon, sortBy,
   ]);
 
-  useEffect(() => {
-    rebuildClasses();
-  }, [rebuildClasses]);
+  // --- STEP 3: lay the user's own edits over the computed classes.
+  const classes = useMemo(
+    () => computedClasses.map((c) => (overrides[c.key] ? { ...c, ...overrides[c.key] } : c)),
+    [computedClasses, overrides]
+  );
+
+  const numericFieldSelected = isNumericField(selectedField);
+  const classesUnavailable =
+    mode !== "simple" && !isReading && rawValues.length > 0 && classes.length === 0;
 
   // Everything the widget shows, as a config buildRenderer understands.
   const rendererConfig = useMemo(() => {
     if (!layer) return null;
 
     // A `symbol` key wins over the colour/size fields in buildRenderer, which
-    // is how a picture marker gets through unchanged.
-    const shape = (color, px) => ({ color, size: px, outlineWidth });
-    const forClass = (c) =>
-      usePictures ? { symbol: pictureSymbol(c.icon ?? singleIcon, c.size ?? size) } : shape(c.color, c.size ?? size);
+    // is how a picture marker gets through unchanged. `width` is what a line
+    // symbol reads its thickness from, so it is sent alongside `size`.
+    const shape = (color, px) => ({ color, size: px, width: px, outlineColor, outlineWidth });
+    const forClass = (c) => {
+      if (hiddenKeys.has(c.key)) return HIDDEN_SYMBOL;
+      return usePictures
+        ? { symbol: pictureSymbol(c.icon ?? singleIcon, c.size ?? size) }
+        : shape(c.color, c.size ?? size);
+    };
 
     if (mode === "simple") {
       return {
         type: "simple",
         defaultSymbol: usePictures
           ? { symbol: pictureSymbol(singleIcon, size) }
-          : { color: singleColor, size, width: outlineWidth || 1, outlineWidth },
+          : shape(singleColor, size),
       };
     }
     if (classes.length === 0) return null;
@@ -287,33 +338,45 @@ export default function SymbologyWidget() {
       type: "class-breaks",
       field,
       defaultSymbol: fallback,
-      values: classes.map((c) => ({ min: c.min, max: c.max, ...forClass(c) })),
+      values: classes.map((c) => ({ min: c.min, max: c.max, label: c.label, ...forClass(c) })),
     };
-  }, [layer, mode, classes, field, singleColor, size, outlineWidth, usePictures, singleIcon]);
+  }, [
+    layer, mode, classes, field, singleColor, size, outlineColor, outlineWidth,
+    usePictures, singleIcon, hiddenKeys,
+  ]);
 
   // Applied as you go, like Pro's pane -- there is no Apply button because
   // every control here is cheap and reversible.
   useEffect(() => {
     if (!hasEdits || !layer || !rendererConfig || !view) return;
-    if (!originalRenderers.current.has(layerId)) {
-      originalRenderers.current.set(layerId, layer.renderer);
+    if (!originalStyles.current.has(layerId)) {
+      originalStyles.current.set(layerId, { renderer: layer.renderer, opacity: layer.opacity });
     }
     try {
       const renderer = buildRendererFromConfig(rendererConfig, layer.geometryType);
       if (renderer) layer.renderer = renderer;
+      layer.opacity = opacity;
     } catch (err) {
       setError(`Could not apply symbology: ${err.message}`);
     }
-  }, [hasEdits, layer, layerId, rendererConfig, view]);
+  }, [hasEdits, layer, layerId, rendererConfig, view, opacity]);
 
   const restoreDefault = () => {
     if (!layer) return;
-    const original = originalRenderers.current.get(layerId);
-    if (original) layer.renderer = original;
-    originalRenderers.current.delete(layerId);
+    const original = originalStyles.current.get(layerId);
+    if (original) {
+      // Assigned even when the layer had no renderer of its own: null is how
+      // you hand it back to its default, and skipping the assignment left our
+      // renderer in place with nothing able to remove it.
+      layer.renderer = original.renderer ?? null;
+      layer.opacity = original.opacity ?? 1;
+      setOpacity(original.opacity ?? 1);
+    }
+    originalStyles.current.delete(layerId);
     setHasEdits(false);
     setMode("simple");
-    setClasses([]);
+    setOverrides({});
+    setHiddenKeys(new Set());
     setError(null);
   };
 
@@ -322,16 +385,28 @@ export default function SymbologyWidget() {
   const selectLayer = (id) => {
     setHasEdits(false);
     setLayerId(id);
+    setOverrides({});
+    setHiddenKeys(new Set());
+    setRawValues([]);
+    setOpacity(layers[id]?.opacity ?? 1);
   };
 
-  const setClassColor = (key, color) => {
+  const override = (key, patch) => {
     setHasEdits(true);
-    setClasses((prev) => prev.map((c) => (c.key === key ? { ...c, color } : c)));
+    setOverrides((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
   };
+  const setClassColor = (key, color) => override(key, { color });
+  const setClassIcon = (key, icon) => override(key, { icon });
+  const setClassLabel = (key, label) => override(key, { label });
 
-  const setClassIcon = (key, icon) => {
+  const toggleHidden = (key) => {
     setHasEdits(true);
-    setClasses((prev) => prev.map((c) => (c.key === key ? { ...c, icon } : c)));
+    setHiddenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   if (symbolizableLayers.length === 0) {
@@ -342,381 +417,295 @@ export default function SymbologyWidget() {
     );
   }
 
+  const sizeLabel = isLineLayer ? "Line width" : mode === "graduated-symbol" ? "Largest size" : "Symbol size";
+  const previewClass = classes[Math.floor(classes.length / 2)] ?? null;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <CalciteLabel scale="s">
-        Layer
-        <CalciteSelect
-          label="Layer"
-          scale="s"
-          value={layerId}
-          onCalciteSelectChange={(e) => selectLayer(e.target.value)}
-        >
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {/* --- Layer, and how to draw it. Always visible: these two choices
+              frame everything below, so they don't belong in a section that
+              can be collapsed away from them. --- */}
+      <div style={{ padding: "0.6rem 0.75rem", borderBottom: "1px solid var(--calcite-color-border-3, #2b2b2a)" }}>
+        <FieldLabel>Layer</FieldLabel>
+        <CalciteSelect label="Layer" scale="s" value={layerId} onCalciteSelectChange={(e) => selectLayer(e.target.value)}>
           {symbolizableLayers.map((l) => (
             <CalciteOption key={l.id} value={l.id}>{l.title}</CalciteOption>
           ))}
         </CalciteSelect>
-      </CalciteLabel>
 
-      <CalciteLabel scale="s">
-        Primary symbology
-        <CalciteSelect
-          label="Primary symbology"
-          scale="s"
-          value={mode}
-          onCalciteSelectChange={(e) => edit(setMode)(e.target.value)}
-        >
-          {PRIMARY_SYMBOLOGY.map((m) => (
-            <CalciteOption key={m.id} value={m.id}>{m.name}</CalciteOption>
-          ))}
-        </CalciteSelect>
-      </CalciteLabel>
+        <div style={{ height: "0.6rem" }} />
 
-      {activeMode?.needsField && (
-        <CalciteLabel scale="s">
-          Field
-          <CalciteSelect
-            label="Field"
-            scale="s"
-            value={field}
-            onCalciteSelectChange={(e) => edit(setField)(e.target.value)}
-          >
-            {fields
-              .filter((f) => !activeMode.numericOnly || isNumericField(f))
-              .map((f) => (
-                <CalciteOption key={f.name} value={f.name}>{f.alias}</CalciteOption>
-              ))}
-          </CalciteSelect>
-        </CalciteLabel>
-      )}
+        <FieldLabel>Draw by</FieldLabel>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+          {PRIMARY_SYMBOLOGY.map((m) => {
+            const isActive = m.id === mode;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                title={m.hint}
+                onClick={() => edit(setMode)(m.id)}
+                style={{
+                  padding: "6px 8px", cursor: "pointer", borderRadius: "3px", textAlign: "left",
+                  fontSize: "11.5px", lineHeight: 1.2,
+                  color: isActive ? "#fff" : "var(--calcite-color-text-2, #c0c0bd)",
+                  background: isActive ? "var(--calcite-color-brand, #3987e5)" : "var(--calcite-color-foreground-2, #2b2b2a)",
+                  border: `1px solid ${isActive ? "var(--calcite-color-brand, #3987e5)" : "var(--calcite-color-border-2, #3a3a38)"}`,
+                }}
+              >
+                {m.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-      {isGraduated && (
-        <>
-          <CalciteLabel scale="s">
-            Method
-            <CalciteSelect
-              label="Method"
-              scale="s"
-              value={method}
-              onCalciteSelectChange={(e) => edit(setMethod)(e.target.value)}
-            >
-              {CLASSIFICATION_METHODS.map((m) => (
-                <CalciteOption key={m.id} value={m.id}>{m.name}</CalciteOption>
-              ))}
-            </CalciteSelect>
-          </CalciteLabel>
+      {/* --- The symbol itself, shown rather than described. --- */}
+      <CalciteBlock scale="s" heading="Symbol" open collapsible>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", padding: "0.15rem 0" }}>
+          <SymbolPreview
+            geometryType={layer?.geometryType}
+            color={previewClass?.color ?? singleColor}
+            size={previewClass?.size ?? size}
+            outlineColor={outlineColor}
+            outlineWidth={outlineWidth}
+            iconUrl={usePictures ? previewClass?.icon ?? singleIcon : null}
+            opacity={opacity}
+          />
 
-          <CalciteLabel scale="s">
-            Classes
-            <CalciteInputNumber
-              scale="s"
-              min={2}
-              max={9}
-              value={String(classCount)}
-              onCalciteInputNumberChange={(e) => {
-                const n = Number(e.target.value);
-                if (Number.isFinite(n)) edit(setClassCount)(Math.min(9, Math.max(2, n)));
-              }}
-            />
-          </CalciteLabel>
-        </>
-      )}
+          {allowsPictures && (
+            <Row label="Symbol type">
+              <CalciteSelect label="Symbol type" scale="s" value={symbolStyle} onCalciteSelectChange={(e) => edit(setSymbolStyle)(e.target.value)}>
+                <CalciteOption value="shape">Shape</CalciteOption>
+                <CalciteOption value="picture">Picture marker</CalciteOption>
+              </CalciteSelect>
+            </Row>
+          )}
 
-      {allowsPictures && (
-        <CalciteLabel scale="s">
-          Symbol type
-          <CalciteSelect
-            label="Symbol type"
-            scale="s"
-            value={symbolStyle}
-            onCalciteSelectChange={(e) => edit(setSymbolStyle)(e.target.value)}
-          >
-            <CalciteOption value="shape">Shape</CalciteOption>
-            <CalciteOption value="picture">Picture marker</CalciteOption>
-          </CalciteSelect>
-        </CalciteLabel>
-      )}
+          {(mode === "simple" || mode === "graduated-symbol") && (
+            <Row label={usePictures ? "Marker" : "Colour"}>
+              {usePictures ? (
+                <IconField icon={singleIcon} onChange={edit(setSingleIcon)} box={26} />
+              ) : (
+                <SwatchField color={singleColor} onChange={edit(setSingleColor)} box={26} />
+              )}
+            </Row>
+          )}
 
-      {mode !== "simple" && mode !== "graduated-symbol" && !usePictures && (
-        <>
-          <CalciteLabel scale="s">
-            Color scheme
-            <CalciteSelect
-              label="Color scheme"
-              scale="s"
-              value={schemeId}
-              onCalciteSelectChange={(e) => edit(setSchemeId)(e.target.value)}
-            >
-              {schemes.map((s) => (
-                <CalciteOption key={s.id} value={s.id}>{s.name}</CalciteOption>
-              ))}
-            </CalciteSelect>
-          </CalciteLabel>
-          <CalciteLabel layout="inline" scale="s">
-            <CalciteSwitch
-              scale="s"
-              checked={reverse ? true : undefined}
-              onCalciteSwitchChange={(e) => edit(setReverse)(e.target.checked)}
-            />
-            Reverse colors
-          </CalciteLabel>
-        </>
-      )}
-
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <CalciteLabel scale="s" style={{ flex: 1 }}>
-          {mode === "graduated-symbol" ? "Max size" : "Symbol size"}
-          <CalciteInputNumber
-            scale="s"
+          <Slider
+            label={sizeLabel}
+            value={size}
             min={MIN_SIZE}
             max={MAX_SIZE}
-            value={String(size)}
-            onCalciteInputNumberChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isFinite(n)) edit(setSize)(Math.min(MAX_SIZE, Math.max(MIN_SIZE, n)));
-            }}
+            step={1}
+            onChange={edit(setSize)}
+            format={(v) => `${v} px`}
           />
-        </CalciteLabel>
-        <CalciteLabel scale="s" style={{ flex: 1 }}>
-          Outline
-          <CalciteInputNumber
-            scale="s"
-            min={0}
-            max={4}
-            step={0.5}
-            value={String(outlineWidth)}
-            onCalciteInputNumberChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isFinite(n)) edit(setOutlineWidth)(Math.min(4, Math.max(0, n)));
-            }}
-          />
-        </CalciteLabel>
-      </div>
 
-      {(mode === "simple" || mode === "graduated-symbol") &&
-        (usePictures ? (
-          <IconField label="Marker" icon={singleIcon} onChange={edit(setSingleIcon)} />
-        ) : (
-          <SwatchField label="Color" color={singleColor} onChange={edit(setSingleColor)} />
-        ))}
+          {!usePictures && (
+            <Row label="Outline">
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                <SwatchField color={outlineColor} onChange={edit(setOutlineColor)} box={26} title="Outline colour" />
+                <CalciteInputNumber
+                  scale="s"
+                  min={0}
+                  max={4}
+                  step={0.5}
+                  value={String(outlineWidth)}
+                  onCalciteInputNumberChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (Number.isFinite(n)) edit(setOutlineWidth)(Math.min(4, Math.max(0, n)));
+                  }}
+                />
+              </div>
+            </Row>
+          )}
+
+          <Slider
+            label="Layer opacity"
+            value={Math.round(opacity * 100)}
+            min={0}
+            max={100}
+            step={5}
+            onChange={(v) => edit(setOpacity)(v / 100)}
+            format={(v) => `${v}%`}
+          />
+        </div>
+      </CalciteBlock>
+
+      {/* --- Which column, cut how. --- */}
+      {activeMode?.needsField && (
+        <CalciteBlock scale="s" heading="Classification" open collapsible>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", padding: "0.15rem 0" }}>
+            <Row label="Field">
+              <CalciteSelect label="Field" scale="s" value={field} onCalciteSelectChange={(e) => edit(setField)(e.target.value)}>
+                {fields
+                  .filter((f) => !activeMode.numericOnly || isNumericField(f))
+                  .map((f) => (
+                    <CalciteOption key={f.name} value={f.name}>{f.alias}</CalciteOption>
+                  ))}
+              </CalciteSelect>
+            </Row>
+
+            {isGraduated && (
+              <>
+                <Row label="Method">
+                  <CalciteSelect label="Method" scale="s" value={method} onCalciteSelectChange={(e) => edit(setMethod)(e.target.value)}>
+                    {CLASSIFICATION_METHODS.map((m) => (
+                      <CalciteOption key={m.id} value={m.id}>{m.name}</CalciteOption>
+                    ))}
+                  </CalciteSelect>
+                </Row>
+
+                <Slider
+                  label="Classes"
+                  value={classCount}
+                  min={2}
+                  max={9}
+                  step={1}
+                  onChange={edit(setClassCount)}
+                  format={(v) => String(v)}
+                />
+
+                {numericFieldSelected && numericValues.length > 0 && (
+                  <div>
+                    <FieldLabel>Distribution</FieldLabel>
+                    <Histogram values={numericValues} breaks={classes} />
+                  </div>
+                )}
+              </>
+            )}
+
+            {mode !== "graduated-symbol" && !usePictures && (
+              <>
+                <Row label="Colour scheme">
+                  <CalciteSelect label="Colour scheme" scale="s" value={schemeId} onCalciteSelectChange={(e) => edit(setSchemeId)(e.target.value)}>
+                    {schemes.map((s) => (
+                      <CalciteOption key={s.id} value={s.id}>{s.name}</CalciteOption>
+                    ))}
+                  </CalciteSelect>
+                </Row>
+                <Row label="Reverse colours">
+                  <CalciteSwitch
+                    scale="s"
+                    checked={reverse ? true : undefined}
+                    onCalciteSwitchChange={(e) => edit(setReverse)(e.target.checked)}
+                  />
+                </Row>
+              </>
+            )}
+          </div>
+        </CalciteBlock>
+      )}
+
+      {/* --- The legend, and where a class gets recoloured, renamed or hidden. --- */}
+      {mode !== "simple" && (
+        <CalciteBlock
+          scale="s"
+          heading="Legend"
+          description={classes.length ? `${classes.length} classes` : undefined}
+          open
+          collapsible
+        >
+          {isReading && <CalciteLoader label="Reading field values" scale="s" inline />}
+          {!isReading && classes.length > 0 && (
+            <ClassList
+              classes={classes}
+              mode={mode}
+              usePictures={usePictures}
+              hidden={hiddenKeys}
+              sortBy={sortBy}
+              onSortChange={setSortBy}
+              onColorChange={setClassColor}
+              onIconChange={setClassIcon}
+              onLabelChange={setClassLabel}
+              onToggleHidden={toggleHidden}
+              foldedCount={foldedCount}
+            />
+          )}
+          {classesUnavailable && (
+            <div style={{ fontSize: "11.5px", color: "var(--calcite-color-text-3, #8a8a86)" }}>
+              {activeMode?.numericOnly && !numericFieldSelected
+                ? "Graduated symbology needs a numeric field."
+                : "That field has nothing to classify."}
+            </div>
+          )}
+        </CalciteBlock>
+      )}
 
       {error && (
-        <CalciteNotice open kind="danger" icon="exclamation-mark-triangle" scale="s">
-          <div slot="message">{error}</div>
-        </CalciteNotice>
+        <div style={{ padding: "0.5rem 0.75rem" }}>
+          <CalciteNotice open kind="danger" icon="exclamation-mark-triangle" scale="s">
+            <div slot="message">{error}</div>
+          </CalciteNotice>
+        </div>
       )}
 
-      {isBuilding && <CalciteLoader label="Reading field values" scale="s" inline />}
-
-      {!isBuilding && classes.length > 0 && (
-        <ClassList
-          classes={classes}
-          mode={mode}
-          usePictures={usePictures}
-          onColorChange={setClassColor}
-          onIconChange={setClassIcon}
-          foldedCount={foldedCount}
-        />
-      )}
-
-      <CalciteButton
-        appearance="outline"
-        kind="neutral"
-        scale="s"
-        width="full"
-        iconStart="reset"
-        onClick={restoreDefault}
-      >
-        Restore default symbology
-      </CalciteButton>
+      <div style={{ padding: "0.6rem 0.75rem", borderTop: "1px solid var(--calcite-color-border-3, #2b2b2a)" }}>
+        <CalciteButton
+          appearance="outline"
+          kind="neutral"
+          scale="s"
+          width="full"
+          iconStart="reset"
+          disabled={!hasEdits ? true : undefined}
+          onClick={restoreDefault}
+        >
+          Restore default symbology
+        </CalciteButton>
+      </div>
     </div>
   );
 }
 
-/** The legend, and the only place a class colour can be edited. */
-function ClassList({ classes, mode, usePictures, onColorChange, onIconChange, foldedCount }) {
-  // The colour-blindness caveat is about hue; picture markers carry shape too.
-  const overCvdLimit =
-    !usePictures && mode === "unique-value" && classes.length > CVD_SAFE_UNIQUE_CLASSES;
+/** Small caps-ish field caption. Calcite's own label is too loud at this density. */
+function FieldLabel({ children }) {
+  return (
+    <div
+      style={{
+        fontSize: "10.5px",
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        color: "var(--calcite-color-text-3, #8a8a86)",
+        marginBottom: "0.25rem",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Caption above its control, so the value is the thing that stands out. */
+function Row({ label, children }) {
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          fontSize: "11px",
-          color: "var(--text-muted, #a0aab7)",
-          marginBottom: "0.35rem",
-        }}
-      >
-        <span>{classes.length} classes</span>
-        <span>features</span>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-        {classes.map((c) => (
-          <div
-            key={c.key}
-            style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "2px 0" }}
-          >
-            {usePictures ? (
-              <IconField icon={c.icon} onChange={(icon) => onIconChange(c.key, icon)} />
-            ) : (
-              <SwatchField
-                color={c.color}
-                size={c.size}
-                onChange={(color) => onColorChange(c.key, color)}
-              />
-            )}
-            <span
-              title={c.label}
-              style={{
-                flex: 1, minWidth: 0, fontSize: "12px", color: "#e2e8f0",
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}
-            >
-              {c.label}
-            </span>
-            <span style={{ fontSize: "11px", color: "var(--text-muted, #a0aab7)" }}>
-              {c.count?.toLocaleString() ?? ""}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {foldedCount > 0 && (
-        <CalciteNotice open icon="information" scale="s" style={{ marginTop: "0.5rem" }}>
-          <div slot="message">
-            {foldedCount} rarer {foldedCount === 1 ? "value is" : "values are"} drawn as
-            &ldquo;Other&rdquo;. Past {MAX_UNIQUE_CLASSES} classes the map stops being readable
-            at a glance.
-          </div>
-        </CalciteNotice>
-      )}
-
-      {overCvdLimit && (
-        <div
-          style={{
-            marginTop: "0.4rem", fontSize: "10px", lineHeight: 1.4,
-            color: "var(--text-muted, #a0aab7)",
-          }}
-        >
-          Above {CVD_SAFE_UNIQUE_CLASSES} categories some pairs are hard to tell apart with
-          colour vision deficiency — this list is the legend that resolves them.
-        </div>
-      )}
+      <FieldLabel>{label}</FieldLabel>
+      {children}
     </div>
   );
 }
 
-/** Picks one of the bundled picture markers. The picture-symbol twin of SwatchField. */
-function IconField({ label, icon, onChange }) {
-  const [open, setOpen] = useState(false);
-  const idRef = useRef(`icon-${Math.random().toString(36).slice(2)}`);
-
+/** A slider with its current value beside the caption. */
+function Slider({ label, value, min, max, step, onChange, format }) {
   return (
-    <>
-      {label && (
-        <span style={{ fontSize: "12px", color: "var(--text-muted, #a0aab7)", marginRight: "0.5rem" }}>
-          {label}
+    <div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <FieldLabel>{label}</FieldLabel>
+        <span style={{ fontSize: "11px", color: "var(--calcite-color-text-2, #c0c0bd)" }}>
+          {format ? format(value) : value}
         </span>
-      )}
-      <button
-        type="button"
-        id={idRef.current}
-        onClick={() => setOpen((v) => !v)}
-        title="Change marker"
-        aria-label={label ? `Change ${label}` : "Change class marker"}
-        style={{
-          flex: "0 0 auto", width: "24px", height: "24px", padding: 0, cursor: "pointer",
-          borderRadius: "4px", border: "1px solid var(--border-color, #2d3748)",
-          background: "transparent", display: "flex", alignItems: "center", justifyContent: "center",
+      </div>
+      <CalciteSlider
+        scale="s"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onCalciteSliderInput={(e) => {
+          const n = Number(e.target.value);
+          if (Number.isFinite(n)) onChange(n);
         }}
-      >
-        <img src={icon} alt="" style={{ maxWidth: "18px", maxHeight: "18px" }} />
-      </button>
-      <CalcitePopover
-        open={open ? true : undefined}
-        referenceElement={idRef.current}
-        placement="leading-start"
-        overlayPositioning="fixed"
-        onCalcitePopoverClose={() => setOpen(false)}
-      >
-        <div
-          style={{
-            display: "grid", gridTemplateColumns: "repeat(4, 40px)", gap: "4px", padding: "8px",
-          }}
-        >
-          {MARKER_ICONS.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              title={m.name}
-              onClick={() => { onChange(m.url); setOpen(false); }}
-              style={{
-                width: "40px", height: "40px", cursor: "pointer", borderRadius: "4px",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                background: m.url === icon ? "rgba(59,130,246,0.25)" : "transparent",
-                border: `1px solid ${m.url === icon ? "var(--text-highlight, #38bdf8)" : "transparent"}`,
-              }}
-            >
-              <img src={m.url} alt={m.name} style={{ maxWidth: "24px", maxHeight: "24px" }} />
-            </button>
-          ))}
-        </div>
-      </CalcitePopover>
-    </>
-  );
-}
-
-/** A colour chip that opens a picker. Doubles as the class size preview. */
-function SwatchField({ label, color, size, onChange }) {
-  const [open, setOpen] = useState(false);
-  const buttonRef = useRef(null);
-  const idRef = useRef(`swatch-${Math.random().toString(36).slice(2)}`);
-  const dot = Math.min(18, Math.max(8, size ?? 14));
-
-  return (
-    <>
-      {label && (
-        <span style={{ fontSize: "12px", color: "var(--text-muted, #a0aab7)", marginRight: "0.5rem" }}>
-          {label}
-        </span>
-      )}
-      <button
-        type="button"
-        id={idRef.current}
-        ref={buttonRef}
-        onClick={() => setOpen((v) => !v)}
-        title="Change color"
-        aria-label={label ? `Change ${label}` : "Change class color"}
-        style={{
-          flex: "0 0 auto", width: "24px", height: "24px", padding: 0, cursor: "pointer",
-          borderRadius: "4px", border: "1px solid var(--border-color, #2d3748)",
-          background: "transparent", display: "flex", alignItems: "center", justifyContent: "center",
-        }}
-      >
-        <span
-          style={{
-            width: `${dot}px`, height: `${dot}px`, borderRadius: "50%",
-            background: color, border: "1px solid rgba(255,255,255,0.35)",
-          }}
-        />
-      </button>
-      <CalcitePopover
-        open={open ? true : undefined}
-        referenceElement={idRef.current}
-        placement="leading-start"
-        overlayPositioning="fixed"
-        onCalcitePopoverClose={() => setOpen(false)}
-      >
-        <CalciteColorPicker
-          scale="s"
-          format="hex"
-          value={color}
-          onCalciteColorPickerChange={(e) => onChange(String(e.target.value))}
-        />
-      </CalcitePopover>
-    </>
+      />
+    </div>
   );
 }
