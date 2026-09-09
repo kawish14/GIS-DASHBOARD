@@ -33,6 +33,7 @@ import SiteDetails from "./details/SiteDetails";
 import LonghaulDetails from "./details/LonghaulDetails";
 import ParcelDetails from "./details/ParcelDetails";
 import CoordinateDetails from './details/CoordinateDetails';
+import CoincidentFeaturePager from './CoincidentFeaturePager';
 import FspOutageAnalyzer from '../../map/widgets/FspOutageAnalyzer';
 import InactiveCustomerFilter from '../../filters/widgets/InactiveCustomerFilter';
 import DensityMapToggle from '../../map/widgets/DensityMapToggle';
@@ -74,7 +75,7 @@ export const featureMeta = [
 export default function RightSidebar({ hidden = false }) {
   const {
     selectionStack, activeSelectionId, setActiveSelectionId, closeSelection, clearAllSelections,
-    updateSelectionFeature, parcelFeature, setParcelFeature,
+    updateSelectionFeature, setEntryCandidate, parcelFeature, setParcelFeature,
   } = useSelection();
   const activeEntry = useMemo(
     () => selectionStack.find(e => e.id === activeSelectionId) || null,
@@ -152,7 +153,8 @@ export default function RightSidebar({ hidden = false }) {
   const handleTabClick = useCallback(async (entry) => {
     setActiveSelectionId(entry.id);
     if (!view) return;
-    let target = entry.feature;
+    const original = entry.feature;
+    let target = original;
     if (target && !target.geometry && target.layer) {
       try {
         const layer = target.layer;
@@ -167,7 +169,7 @@ export default function RightSidebar({ hidden = false }) {
           if (results.features?.length) {
             target = results.features[0];
             target.layer = layer;
-            updateSelectionFeature(entry.id, target);
+            updateSelectionFeature(entry.id, target, original);
           }
         }
       } catch (err) {
@@ -237,7 +239,8 @@ export default function RightSidebar({ hidden = false }) {
                 const fullFeature = results.features[0];
                 fullFeature.layer = layer;
                 fullFeature.isFullyLoaded = true;
-                if (entryId != null) updateSelectionFeature(entryId, fullFeature);
+                // popupFeature is the candidate this query was started for.
+                if (entryId != null) updateSelectionFeature(entryId, fullFeature, popupFeature);
              }
           }
         } catch (error) {
@@ -368,6 +371,15 @@ export default function RightSidebar({ hidden = false }) {
               </div>
             )}
             {renderFeatureDetails()}
+            {/* Sits below the details and stays put while they scroll: the
+                click that opened this panel may have landed on several
+                stacked features, and this is how you reach the rest. */}
+            <CoincidentFeaturePager
+              entryId={activeEntry?.id}
+              candidates={activeEntry?.candidates}
+              index={activeEntry?.candidateIndex ?? 0}
+              onSelect={(next) => activeEntry && setEntryCandidate(activeEntry.id, next)}
+            />
           </div>
         </FeatureGuard>
 

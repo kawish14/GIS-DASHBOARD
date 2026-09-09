@@ -73,7 +73,13 @@ export default function GlobalClickHandler() {
 
         if (currentClick !== clickIdRef.current) return;
 
-        const featureResult = result.results.find(
+        // Every graphic under the cursor, not just the top one. Points sit on
+        // top of each other all the time -- several customers at one premises,
+        // a DC dropped on its POP -- and taking only the first hit meant the
+        // sidebar silently described whichever one happened to draw last,
+        // with no sign the others existed. hitTest already returns them all,
+        // ordered top-most first; the sidebar pages through them.
+        const hits = result.results.filter(
           (r) =>
             r.type === "graphic" &&
             r.layer &&
@@ -83,10 +89,31 @@ export default function GlobalClickHandler() {
             r.layer.title !== "Home Parcels"
         );
 
-        //  CASE 1: NORMAL FEATURE FOUND
-        if (featureResult) {
-          const clickedGraphic = featureResult.graphic;
-          clickedGraphic.layer = clickedGraphic.layer || featureResult.layer;
+        //  CASE 1: NORMAL FEATURE(S) FOUND
+        if (hits.length > 0) {
+          const seen = new Set();
+          const candidates = [];
+
+          for (const hit of hits) {
+            const graphic = hit.graphic;
+            graphic.layer = graphic.layer || hit.layer;
+
+            // One feature can be hit twice (overlapping symbol parts, or a
+            // layer drawn in more than one pass), which would show up as a
+            // duplicate page. Object id within its layer identifies it;
+            // graphics without one -- client-side markers, cluster
+            // aggregates -- fall back to the uid ArcGIS assigns them.
+            const objIdField = graphic.layer?.objectIdField || "__OBJECTID";
+            const objectId = graphic.attributes?.[objIdField];
+            const key =
+              objectId !== undefined && objectId !== null
+                ? `${graphic.layer?.title ?? ""}::${objectId}`
+                : `uid::${graphic.uid ?? candidates.length}`;
+
+            if (seen.has(key)) continue;
+            seen.add(key);
+            candidates.push(graphic);
+          }
 
           // Clear parcel
           setParcelFeature(null);
@@ -97,7 +124,7 @@ export default function GlobalClickHandler() {
           // and their highlights). Nested lookups from *inside* a popup use
           // useSelection().pushSelection() instead, so they append rather than
           // replace -- see DcDetails/CustomerDetails link handlers.
-          startNewSelection(clickedGraphic);
+          startNewSelection(candidates[0], { candidates });
           return;
         }
 
