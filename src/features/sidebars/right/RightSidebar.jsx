@@ -121,6 +121,16 @@ export default function RightSidebar({ hidden = false }) {
     });
   }, [hasPermission]);
 
+  // Permissions can change while the user is signed in -- the server now
+  // refreshes them from the role on every request -- so the tool that is open
+  // may be one they have just lost. Fall back to whatever they do still have,
+  // rather than leaving the panel showing a heading with nothing under it.
+  useEffect(() => {
+    if (permittedActions.length === 0) return;
+    if (permittedActions.some((a) => a.text === activeTool)) return;
+    setActiveTool(permittedActions[0].text);
+  }, [permittedActions, activeTool]);
+
   useEffect(() => {
     if (popupFeature || parcelFeature) {
       const canViewDetails = permittedActions.some(a => a.text === DETAILS_TOOL);
