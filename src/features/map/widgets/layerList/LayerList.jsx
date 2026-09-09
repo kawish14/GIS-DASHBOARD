@@ -11,23 +11,8 @@ import {
   CalciteFilter,
 } from "@esri/calcite-components-react";
 
-// --- Configuration ---
-const LAYER_LABELS = {
-  fat: "Fiber Access Terminal (FAT)",
-  Backhaul: "Backhaul Routes",
-  Customers_test: "Customers",
-  Distribution: "Distribution OFC",
-  Feeder: "Feeder OFC",
-  dc_odb: "Distribution Cabinets (DC/ODB)",
-  pop: "POP",
-  jc: "Joint Closure (JC)",
-  pop_boundary: "POP Service Areas",
-  zones: "Zones",
-  site: "TWA Site",
-  longhaul: "TWA Longhaul",
-  "Vehicles": "Live Vehicles",
-  "Home Parcels": "Home Parcels"
-};
+// Shared with the right sidebar's identify pager, which labels the same layers.
+import { LAYER_LABELS } from "../../../../shared/constants/layerLabels";
 
 // --- Define Custom Order (Top to Bottom) ---
 const LAYER_SEQUENCE = [
