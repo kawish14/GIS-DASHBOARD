@@ -14,22 +14,45 @@ import { layerLabel } from "../../../shared/constants/layerLabels";
  */
 
 // Attributes worth showing as "which one is this", best first. Layers name
-// their key differently (customers carry an `ontid`, sites a `site_id`), and
-// the object id is only a last resort -- it means nothing to the user, but it
-// still tells two otherwise identical rows apart.
-const IDENTITY_FIELDS = ["id", "name", "ontid", "dc_id", "pop_id", "site_id", "objectid"];
+// their key differently, so the ones that belong to a single layer come first
+// -- a vehicle is its registration number, a cable its cable_id, a TWA site
+// its name -- and only then the `id` that most layers share. The object id is
+// the last resort: it means nothing to the user, but it still tells two
+// otherwise identical rows apart.
+const IDENTITY_FIELDS = [
+  "reg_no",     // Vehicles
+  "site_name",  // TWA sites
+  "cable_id",   // Feeder / Distribution / Longhaul
+  "plot",       // Parcels
+  "id",         // Customers, POP, DC, FAT, JC
+  "name",
+  "ontid",
+  "objectid",
+];
+
+function firstValue(attributes, fields) {
+  for (const field of fields) {
+    const value = attributes[field];
+    if (value !== undefined && value !== null && value !== "") return String(value);
+  }
+  return "";
+}
 
 function featureIdentity(feature) {
   if (feature?.isAggregate) {
     const count = feature.attributes?.cluster_count;
     return count ? `${count} features` : "Cluster";
   }
+
   const attributes = feature?.attributes ?? {};
-  for (const field of IDENTITY_FIELDS) {
-    const value = attributes[field];
-    if (value !== undefined && value !== null && value !== "") return String(value);
-  }
-  return "";
+  const primary = firstValue(attributes, IDENTITY_FIELDS);
+  const name = firstValue(attributes, ["name"]);
+
+  // Where a layer carries both -- "Korangi POP" alongside its 2110 -- show
+  // them together, since the name is what someone recognises and the id is
+  // what tells two of them apart.
+  if (name && primary && name !== primary) return `${name} \u00b7 ${primary}`;
+  return primary || name;
 }
 
 export default function CoincidentFeaturePager({ entryId, candidates, index, onSelect }) {
@@ -82,8 +105,10 @@ export default function CoincidentFeaturePager({ entryId, candidates, index, onS
     <div
       ref={containerRef}
       style={{
-        position: "sticky",
-        bottom: 0,
+        // Positioned only so the list can hang off it; the bar itself is the
+        // last row of the details column, held there by the layout.
+        position: "relative",
+        flex: "0 0 auto",
         zIndex: 2,
         display: "flex",
         justifyContent: "flex-end",
