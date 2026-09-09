@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <link rel="shortcut icon" href="images/tes.png" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GIS Dashboard</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+
+    <!--
+      The dashboard bundle is large (ArcGIS + Calcite), so there is a real gap
+      between the browser painting this document and React mounting. #boot
+      fills it, in plain CSS so it appears before any JavaScript runs.
+
+      It deliberately mirrors the sign-in screen -- same ground, same 40px
+      grid, same corner glows, same wordmark -- so the hand-off from boot to
+      /login is a continuation rather than a jump cut.
+
+      React clears it for free: createRoot() empties #root on its first commit.
+      Anything you add to index.html must therefore live OUTSIDE #root, or it
+      will disappear when the app mounts.
+    -->
+    <style>
+      html, body { margin: 0; height: 100%; background: #0f1115; }
+
+      #boot {
+        position: fixed; inset: 0; overflow: hidden;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        background: #0f1115;
+        font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      /* Same grid and corner glows as AuthShell, so the two screens match. */
+      #boot::before {
+        content: ""; position: absolute; inset: 0;
+        background-image:
+          linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px);
+        background-size: 40px 40px;
+      }
+      #boot::after {
+        content: ""; position: absolute; inset: 0;
+        background:
+          radial-gradient(520px circle at 12% 8%,  rgba(37,99,235,.18), transparent 60%),
+          radial-gradient(520px circle at 88% 92%, rgba(6,182,212,.10), transparent 60%);
+      }
+
+      #boot .inner {
+        position: relative; z-index: 1;
+        display: flex; flex-direction: column; align-items: center;
+      }
+
+      /* Natural aspect is 926x269. Fixed width keeps it crisp -- the old
+         screen scaled the 96px favicon up to 200px, which is why it blurred. */
+      #boot .mark { width: 232px; height: auto; display: block; }
+
+      #boot .name {
+        margin: 18px 0 0;
+        color: #7c8aa0; font-size: 11px; font-weight: 600;
+        letter-spacing: 3.4px; text-transform: uppercase;
+      }
+
+      /* An indeterminate bar rather than a spinner: a spinner on an empty
+         field reads as a stalled browser, a bar reads as an application
+         starting. */
+      #boot .track {
+        position: relative; margin-top: 30px;
+        width: 208px; height: 2px; border-radius: 2px;
+        background: rgba(255,255,255,.06); overflow: hidden;
+      }
+      #boot .track::after {
+        content: ""; position: absolute; inset: 0;
+        border-radius: 2px;
+        background: linear-gradient(90deg, transparent, #2563eb 35%, #22d3ee 65%, transparent);
+        animation: boot-sweep 1.35s cubic-bezier(.45,.05,.3,1) infinite;
+      }
+      @keyframes boot-sweep {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot .track::after { animation-duration: 3.5s; }
+      }
+      @media (max-width: 480px) {
+        #boot .mark { width: 176px; }
+        #boot .track { width: 168px; }
+      }
+    </style>
+
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="root">
+      <div id="boot">
+        <div class="inner">
+          <img class="mark" src="/images/TesLogo.png" alt="" />
+          <p class="name">GIS Dashboard</p>
+          <div class="track"></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
