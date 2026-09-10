@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef, useMemo, useCallback } from "react"
 import {
   CalciteShellPanel,
   CalcitePanel,
+  CalciteFlow,
+  CalciteFlowItem,
   CalciteTabs,
   CalciteTab,
   CalciteTabNav,
@@ -92,13 +94,14 @@ export default function LeftSidebar({ hidden = false }) {
   const [highlightedRegions, setHighlightedRegions] = useState({});
   const [selectedFault, setSelectedFault] = useState(null);
 
-  // The Low Optical Power drill-in: which row's `lopdetail` breakdown is
-  // open, and which customers the cause selected inside it covers.
+  // The Low Optical Power drill-in: which row's `lopdetail` breakdown the
+  // sidebar has navigated to, and which customers the cause selected inside
+  // it covers.
   //
   // Both live here rather than in RegionStats because there is one RegionStats
-  // per region tab, all of them mounted at once -- a window owned by a tab
-  // would stay on screen after the user moved to another region, showing the
-  // wrong region's causes. One window, closed on every navigation, cannot.
+  // per region tab, all of them mounted at once -- a step owned by a tab would
+  // stay on screen after the user moved to another region, showing the wrong
+  // region's causes. One step, closed on every navigation, cannot.
   const [lopDrilldown, setLopDrilldown] = useState(null);
   const [lopCauseIds, setLopCauseIds] = useState(null);
 
@@ -109,8 +112,8 @@ export default function LeftSidebar({ hidden = false }) {
     setLopDrilldown({ region, variant });
   }, []);
 
-  // Closing gives the map back: the cause filter goes, and so does the LOP
-  // highlight the row turned on when it opened the window.
+  // Going back drops the drill-in's hold on the map: the cause filter goes,
+  // and so does the LOP highlight the row turned on when it navigated in.
   const closeLopDetails = useCallback(() => {
     setLopDrilldown(null);
     setLopCauseIds(null);
@@ -123,7 +126,7 @@ export default function LeftSidebar({ hidden = false }) {
   }, [setSidebarOpen, closeLopDetails]);
 
   // Collapsing the sidebar from anywhere else -- the action bar, the right
-  // panel taking the screen -- takes the window with it.
+  // panel taking the screen -- returns the flow to the alarm list.
   useEffect(() => {
     if (isCollapsed) closeLopDetails();
   }, [isCollapsed, closeLopDetails]);
@@ -171,7 +174,7 @@ export default function LeftSidebar({ hidden = false }) {
 
   const handleActionClick = (toolName) => {
     // Either branch leaves the Alarm State tab as the user is looking at it,
-    // so the breakdown window goes either way.
+    // so the breakdown step goes either way.
     closeLopDetails();
 
     if (!isCollapsed && activeTool === toolName) {
@@ -189,7 +192,6 @@ export default function LeftSidebar({ hidden = false }) {
   if (!realtimeStats || permittedActions.length === 0) return null;
 
   return (
-    <>
     <CalciteShellPanel
       ref={panelRef}
       slot="panel-start"
@@ -215,45 +217,72 @@ export default function LeftSidebar({ hidden = false }) {
 
         {/* --- 1. ALARM STATE TAB --- */}
         <FeatureGuard featureKey="tab_Alarm_State">
-          <div style={{ display: activeTool === "Alarm State" ? "block" : "none", height: "100%" }}>
-            <CalciteTabs>
-              <CalciteTabNav slot="title-group">
-                {REGIONS.map((region) => (
-                  <CalciteTabTitle
-                    key={region}
-                    accessKey={region}
-                    onClick={handleTabChange}
-                    selected={tab === region}
-                    style={{ flex: 1, textAlign: "center", width: "80%", justifyContent: 'space-between', marginLeft: '4px' }}
-                  >
-                    {region}
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%" }}>
-                      {highlightedRegions[region] && (
-                        <span style={{ height: "4px", width: "4px", backgroundColor: "rgb(31, 145, 243)", borderRadius: "50%", marginLeft: "8px", boxShadow: "0 0 6px rgb(17, 127, 223)", transition: "opacity 0.5s ease-in-out" }}></span>
-                      )}
-                    </div>
-                  </CalciteTabTitle>
-                ))}
-              </CalciteTabNav>
+          {/* Flex, not block: calcite-flow is `flex: 1 1 auto` and would
+              collapse to its content height inside a block parent. */}
+          <div style={{ display: activeTool === "Alarm State" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+            {/* The alarm list and the LOP breakdown are two steps of one
+                journey, so they are a flow: opening a Low Optical Power row
+                slides the sidebar forward and calcite adds the back arrow.
+                The first item carries no heading, so it renders no header of
+                its own and the region tabs sit where they always did. */}
+            <CalciteFlow>
+              {/* calcite-flow shows the selected item and nothing else, and it
+                  only auto-selects when no item claims to be selected -- so
+                  which step is showing is React's to say, not something the
+                  flow infers from a new child appearing. */}
+              <CalciteFlowItem selected={!lopDrilldown}>
+                <CalciteTabs>
+                  <CalciteTabNav slot="title-group">
+                    {REGIONS.map((region) => (
+                      <CalciteTabTitle
+                        key={region}
+                        accessKey={region}
+                        onClick={handleTabChange}
+                        selected={tab === region}
+                        style={{ flex: 1, textAlign: "center", width: "80%", justifyContent: 'space-between', marginLeft: '4px' }}
+                      >
+                        {region}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%" }}>
+                          {highlightedRegions[region] && (
+                            <span style={{ height: "4px", width: "4px", backgroundColor: "rgb(31, 145, 243)", borderRadius: "50%", marginLeft: "8px", boxShadow: "0 0 6px rgb(17, 127, 223)", transition: "opacity 0.5s ease-in-out" }}></span>
+                          )}
+                        </div>
+                      </CalciteTabTitle>
+                    ))}
+                  </CalciteTabNav>
 
-              {REGIONS.map((region) => (
-                <CalciteTab key={region} selected={tab === region}>
-                  {!alertCount || !realtimeStats ? (
-                    <div style={{ display: "flex", height: "100%", minHeight: "200px", alignItems: "center", justifyContent: "center" }}>
-                      <CalciteLoader label="Loading Alerts" active scale="s" />
-                    </div>
-                  ) : (
-                    <RegionStats
-                      region={region}
-                      selectedFault={selectedFault}
-                      setSelectedFault={setSelectedFault}
-                      onOpenLopDetails={(variant) => openLopDetails(region, variant)}
-                      lopCauseIds={lopCauseIds}
-                    />
-                  )}
-                </CalciteTab>
-              ))}
-            </CalciteTabs>
+                  {REGIONS.map((region) => (
+                    <CalciteTab key={region} selected={tab === region}>
+                      {!alertCount || !realtimeStats ? (
+                        <div style={{ display: "flex", height: "100%", minHeight: "200px", alignItems: "center", justifyContent: "center" }}>
+                          <CalciteLoader label="Loading Alerts" active scale="s" />
+                        </div>
+                      ) : (
+                        <RegionStats
+                          region={region}
+                          selectedFault={selectedFault}
+                          setSelectedFault={setSelectedFault}
+                          onOpenLopDetails={(variant) => openLopDetails(region, variant)}
+                          lopCauseIds={lopCauseIds}
+                        />
+                      )}
+                    </CalciteTab>
+                  ))}
+                </CalciteTabs>
+              </CalciteFlowItem>
+
+              {lopDrilldown && (
+                <LopDetailPanel
+                  // Remounted per row, so the open cause and any notice reset
+                  // with it rather than needing an effect to clear them.
+                  key={`${lopDrilldown.region}-${lopDrilldown.variant}`}
+                  region={lopDrilldown.region}
+                  variant={lopDrilldown.variant}
+                  onClose={closeLopDetails}
+                  onCauseSelect={setLopCauseIds}
+                />
+              )}
+            </CalciteFlow>
           </div>
         </FeatureGuard>
 
@@ -267,20 +296,5 @@ export default function LeftSidebar({ hidden = false }) {
 
       </CalcitePanel>
     </CalciteShellPanel>
-
-    {/* The LOP breakdown window. Portals itself over the map, so it renders
-        here purely to be mounted and unmounted with this sidebar. */}
-    {!hidden && lopDrilldown && (
-      <LopDetailPanel
-        // Remounted per row, so the open cause and any notice reset with it
-        // rather than needing an effect to clear them.
-        key={`${lopDrilldown.region}-${lopDrilldown.variant}`}
-        region={lopDrilldown.region}
-        variant={lopDrilldown.variant}
-        onClose={closeLopDetails}
-        onCauseSelect={setLopCauseIds}
-      />
-    )}
-    </>
   );
 }

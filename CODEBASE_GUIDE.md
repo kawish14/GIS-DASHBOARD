@@ -205,14 +205,20 @@ from `sidebars/right/details/`. Those panels can `pushSelection` to drill in.
 
 **Clicking a Low Optical Power row →** the row is a link, not just a map
 highlight. It selects the fault (so `RegionStats` blooms those points) and
-opens `sidebars/left/LopDetailPanel.jsx`, which portals over the map and
-breaks the same alarm down by its `lopdetail` cause. Selecting a cause there
-lists its customers and hands their ids back to `RegionStats`, which narrows
-the highlight to them -- `RegionStats` stays the only writer of
-`featureEffect`. `LeftSidebar` owns the open window, because there is one
-`RegionStats` per region tab and all of them are mounted at once. Locating a
-customer from the list re-queries the customer layer for the real graphic and
-pushes it onto the selection stack, so the right sidebar opens on it.
+navigates the sidebar forward to `sidebars/left/LopDetailPanel.jsx`, which
+breaks the same alarm down by its `lopdetail` cause. The two are steps of a
+`calcite-flow`: the region tabs are its first item, the breakdown its second,
+and calcite draws the back arrow. Which step is showing is React's to say --
+the flow only auto-selects when no item claims to be selected -- so
+`LeftSidebar` marks the tabs item `selected` exactly while nothing is drilled
+into. Selecting a cause lists its customers and hands their ids back to
+`RegionStats`, which narrows the highlight to them; `RegionStats` stays the
+only writer of `featureEffect`. `LeftSidebar` owns which row is open, because
+there is one `RegionStats` per region tab and all of them are mounted at once.
+Locating a customer from the list re-queries the customer layer for the real
+graphic and pushes it onto the selection stack, so the right sidebar opens on
+it -- the map is never covered, which is the point of keeping this in the
+panel instead of a window over the map.
 
 **Filtering →** a widget queries, sets a `definitionExpression` or layer-view
 filter, pushes rows into `FeatureTableDataContext`, and publishes a summary to

@@ -27,11 +27,12 @@ import { LOP_VARIANTS } from "../../../shared/constants/lopDetail";
  * rather than handed down, since every tab wants the same numbers.
  *
  * The two Low Optical Power rows are summary-level on purpose: the cause
- * breakdown behind them lives in the `lopdetail` field and is a window of its
- * own (LopDetailPanel.jsx), which the parent opens through `onOpenLopDetails`.
- * When a cause is selected in that window the parent hands the matching
- * customer ids back as `lopCauseIds`, and the map highlight below narrows to
- * them -- this component stays the only writer of `featureEffect`.
+ * breakdown behind them lives in the `lopdetail` field and is a step of its
+ * own in the sidebar's flow (LopDetailPanel.jsx), which the parent navigates
+ * to through `onOpenLopDetails`. When a cause is selected there the parent
+ * hands the matching customer ids back as `lopCauseIds`, and the map highlight
+ * below narrows to them -- this component stays the only writer of
+ * `featureEffect`.
  */
 export default function RegionStats({
   region, selectedFault, setSelectedFault, onOpenLopDetails, lopCauseIds
@@ -46,8 +47,8 @@ export default function RegionStats({
 
   /**
    * A LOP row is a link into its breakdown, not a toggle: it always selects
-   * the fault (so the map highlights it) and always opens the window. Closing
-   * the window is what clears both -- see LeftSidebar.jsx.
+   * the fault (so the map highlights it) and always navigates in. Coming back
+   * is what clears both -- see LeftSidebar.jsx.
    */
   const handleLopClick = (variantKey) => {
     setSelectedFault(variantKey);
@@ -91,8 +92,8 @@ export default function RegionStats({
         whereClause = "1=1";
     }
 
-    // A cause picked inside the LOP window narrows the same highlight rather
-    // than starting a competing one. Filtering on `id` rather than on
+    // A cause picked inside the LOP breakdown narrows the same highlight
+    // rather than starting a competing one. Filtering on `id` rather than on
     // `lopdetail` is deliberate: the field is absent from the layer's schema
     // whenever the batch it inferred from carried no LOP rows, and a where
     // clause naming a field that isn't there throws.
@@ -130,9 +131,9 @@ export default function RegionStats({
   // Helper to determine item style based on selection.
   //
   // `stayClickable` is for the drill-in rows: a selected fault normally puts
-  // the others beyond reach, but the breakdown window doesn't cover the
-  // sidebar, and switching between the two LOP rows is the move a user is
-  // most likely to make while it is open. They still dim -- they just answer.
+  // the others beyond reach, but coming back from a breakdown to pick the
+  // other LOP row is the move a user is most likely to make. They still dim --
+  // they just answer.
   const getHighlightStyle = (faultType, { stayClickable = false } = {}) => {
     if (!selectedFault) return "transition-all duration-300 opacity-100 cursor-pointer";
     if (selectedFault === faultType) {

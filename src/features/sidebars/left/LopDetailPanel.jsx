@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   CalciteAction,
   CalciteChip,
+  CalciteFlowItem,
   CalciteIcon,
   CalciteLoader,
   CalciteNotice,
-  CalcitePanel,
 } from "@esri/calcite-components-react";
 import { useLayers } from "../../map/state/LayersContext";
 import { useMapView } from "../../map/state/MapViewContext";
@@ -16,27 +15,23 @@ import { LOP_VARIANTS, UNCLASSIFIED_LOP_CAUSE } from "../../../shared/constants/
 import useLopBreakdown from "./useLopBreakdown";
 
 /**
- * The window behind a Low Optical Power row: the same alarm, broken down by
- * its `lopdetail` cause.
+ * The view behind a Low Optical Power row: the same alarm, broken down by its
+ * `lopdetail` cause.
  *
- * Opened by RegionStats.jsx and owned by LeftSidebar.jsx, which keeps exactly
- * one of these on screen (see the note on `lopDrilldown` there). It renders
- * over the map through a portal rather than inside the sidebar for two
- * reasons: `calcite-shell-panel` is ~320px wide, far too narrow for a cause
- * plus a customer list, and in overlay mode it transforms its content, which
- * would break `position: fixed` on anything nested inside it.
+ * This is a `calcite-flow-item`, not a window. LeftSidebar.jsx renders it as
+ * the second item of the Alarm State flow, so opening it slides the sidebar
+ * forward over the region tabs and calcite gives us the back arrow for free
+ * (the flow puts one on any item past the first, and its `back` event is what
+ * closes this). Navigation, in other words -- the map is never covered, which
+ * matters because putting these customers on the map is the point of the list.
  *
  * Clicking a cause selects it, which does two things at once: reveals the
  * customers under it, and asks the parent to narrow the map highlight to
- * exactly those points. The panel never writes `featureEffect` itself --
+ * exactly those points. The view never writes `featureEffect` itself --
  * RegionStats.jsx is the single writer, and it takes the id list as a prop.
- *
- * It floats rather than blocking: the map stays visible and clickable
- * underneath, so an operator can work down a cause's customer list, sending
- * one after another to the map, without dismissing the window each time.
  */
 
-// The map highlight is a `id IN (...)` where clause, so it cannot take an
+// The map highlight is an `id IN (...)` where clause, so it cannot take an
 // unbounded list. Past this many customers the cause stays selected and
 // listed, but the highlight is left showing the whole variant.
 const MAX_HIGHLIGHT_IDS = 500;
@@ -45,6 +40,8 @@ const MAX_HIGHLIGHT_IDS = 500;
 // count. Long enough to work a fault from, short enough that opening the
 // biggest bucket doesn't mount thousands of rows.
 const MAX_LISTED_CUSTOMERS = 50;
+
+const BORDER = "1px solid var(--calcite-ui-border-3, #2d3748)";
 
 function formatFaultTime(value) {
   if (!value) return "No fault time";
@@ -55,6 +52,9 @@ function formatFaultTime(value) {
 /**
  * One cause: its share of the variant, and -- when open -- the customers
  * behind it.
+ *
+ * Laid out for a ~320px panel: one line per fact, everything that can overflow
+ * ellipsised, and no horizontal scrolling anywhere.
  */
 function CauseRow({ cause, isOpen, accent, onToggle, onLocate }) {
   const listed = cause.customers.slice(0, MAX_LISTED_CUSTOMERS);
@@ -62,7 +62,7 @@ function CauseRow({ cause, isOpen, accent, onToggle, onLocate }) {
   const highlightCapped = cause.count > MAX_HIGHLIGHT_IDS;
 
   return (
-    <div style={{ borderBottom: "1px solid var(--calcite-ui-border-3, #2d3748)" }}>
+    <div style={{ borderBottom: BORDER }}>
       <button
         type="button"
         onClick={onToggle}
@@ -71,8 +71,8 @@ function CauseRow({ cause, isOpen, accent, onToggle, onLocate }) {
         title={cause.samples.length ? cause.samples.join(" | ") : "No lopdetail on these alarms"}
         aria-expanded={isOpen}
         style={{
-          width: "100%", display: "flex", alignItems: "center", gap: "0.75rem",
-          padding: "0.6rem 0.85rem", background: isOpen ? "var(--calcite-ui-foreground-2)" : "transparent",
+          width: "100%", display: "flex", alignItems: "center", gap: "0.5rem",
+          padding: "0.55rem 0.75rem", background: isOpen ? "var(--calcite-ui-foreground-2)" : "transparent",
           border: "none", cursor: "pointer", textAlign: "left", color: "inherit",
         }}
       >
@@ -80,48 +80,48 @@ function CauseRow({ cause, isOpen, accent, onToggle, onLocate }) {
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: "0.8rem", fontWeight: 600, color: "var(--calcite-ui-text-1)",
+            fontSize: "0.78rem", fontWeight: 600, color: "var(--calcite-ui-text-1)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             fontStyle: isUnclassified ? "italic" : "normal",
           }}>
             {cause.label}
           </div>
 
-          {/* Share bar -- the point of the breakdown is which cause dominates,
-              and a number alone makes that a subtraction exercise. */}
-          <div style={{ marginTop: "0.35rem", height: "4px", borderRadius: "2px", background: "var(--calcite-ui-foreground-3)" }}>
+          {/* Share bar -- the point of a breakdown is which cause dominates,
+              and a column of numbers makes that a subtraction exercise. */}
+          <div style={{ marginTop: "0.3rem", height: "4px", borderRadius: "2px", background: "var(--calcite-ui-foreground-3)" }}>
             <div style={{
               width: `${Math.max(cause.share * 100, 2)}%`, height: "100%", borderRadius: "2px",
-              background: isUnclassified ? "var(--calcite-ui-text-3)" : accent,
+              background: isUnclassified ? "var(--calcite-ui-text-2)" : accent,
             }} />
           </div>
         </div>
 
         <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--calcite-ui-text-1)" }}>{cause.count}</div>
-          <div style={{ fontSize: "0.6rem", color: "var(--calcite-ui-text-2)" }}>{(cause.share * 100).toFixed(1)}%</div>
+          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--calcite-ui-text-1)" }}>{cause.count}</div>
+          <div style={{ fontSize: "0.58rem", color: "var(--calcite-ui-text-2)" }}>{(cause.share * 100).toFixed(1)}%</div>
         </div>
       </button>
 
       {isOpen && (
-        <div style={{ padding: "0 0.85rem 0.75rem 2.2rem" }}>
+        <div style={{ padding: "0 0.75rem 0.6rem 1.6rem" }}>
           {listed.map((customer) => (
             <div
               key={customer.id}
-              style={{
-                display: "flex", alignItems: "center", gap: "0.5rem",
-                padding: "0.35rem 0", borderTop: "1px solid var(--calcite-ui-border-3, #2d3748)",
-              }}
+              style={{ display: "flex", alignItems: "center", gap: "0.35rem", padding: "0.3rem 0", borderTop: BORDER }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--calcite-ui-text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--calcite-ui-text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {customer.name || customer.id}
                 </div>
-                <div style={{ fontSize: "0.62rem", color: "var(--calcite-ui-text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {[customer.id, customer.area_town, customer.olt].filter(Boolean).join(" · ")}
+                <div style={{ fontSize: "0.6rem", color: "var(--calcite-ui-text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {[customer.id, customer.area_town].filter(Boolean).join(" · ")}
                 </div>
-                <div style={{ fontSize: "0.6rem", color: "var(--calcite-ui-text-3)" }}>
-                  {formatFaultTime(customer.fault_time)}
+                {/* Tertiary by size and opacity, not by --calcite-ui-text-3:
+                    this theme maps that token to a border colour, which is
+                    invisible against the panel. */}
+                <div style={{ fontSize: "0.58rem", color: "var(--calcite-ui-text-2)", opacity: 0.75, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {[customer.olt, formatFaultTime(customer.fault_time)].filter(Boolean).join(" · ")}
                 </div>
               </div>
 
@@ -136,7 +136,7 @@ function CauseRow({ cause, isOpen, accent, onToggle, onLocate }) {
           ))}
 
           {cause.customers.length > listed.length && (
-            <div style={{ fontSize: "0.62rem", color: "var(--calcite-ui-text-2)", paddingTop: "0.5rem" }}>
+            <div style={{ fontSize: "0.6rem", color: "var(--calcite-ui-text-2)", paddingTop: "0.45rem" }}>
               Showing {listed.length} of {cause.count}.
               {highlightCapped
                 ? " Too many to pick out on the map, so the highlight stays on the whole alarm."
@@ -165,7 +165,7 @@ export default function LopDetailPanel({ region, variant, onClose, onCauseSelect
   const summary = useMemo(() => byVariant[variant] ?? { total: 0, causes: [] }, [byVariant, variant]);
 
   // The open cause is what the map is asked to narrow to. Clearing on unmount
-  // matters as much as setting: closing the panel must not leave the map
+  // matters as much as setting: navigating back must not leave the map
   // filtered down to a cause the user can no longer see.
   useEffect(() => {
     const cause = summary.causes.find((c) => c.code === openCause);
@@ -174,14 +174,6 @@ export default function LopDetailPanel({ region, variant, onClose, onCauseSelect
   }, [openCause, summary, onCauseSelect]);
 
   useEffect(() => () => onCauseSelect(null), [onCauseSelect]);
-
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   /**
    * Drills from a row all the way through to the map: the WFS record carries
@@ -227,128 +219,105 @@ export default function LopDetailPanel({ region, variant, onClose, onCauseSelect
   }, [layers, view, startNewSelection]);
 
   const subtitle = useMemo(() => {
-    if (status === "ready") {
-      return `${region} · ${summary.total.toLocaleString()} customer${summary.total === 1 ? "" : "s"} · ${summary.causes.length} cause${summary.causes.length === 1 ? "" : "s"}`;
-    }
-    return region;
+    if (status !== "ready") return region;
+    const customers = `${summary.total.toLocaleString()} customer${summary.total === 1 ? "" : "s"}`;
+    const causes = `${summary.causes.length} cause${summary.causes.length === 1 ? "" : "s"}`;
+    return `${region} · ${customers} · ${causes}`;
   }, [region, status, summary]);
 
   if (!meta) return null;
 
-  return createPortal(
-    // Floating, not modal, and deliberately so: the whole point of the list is
-    // to put customers on the map, which a dimmed backdrop would hide and a
-    // click trap would block. The wrapper is click-through (`pointer-events:
-    // none`) so only the window itself takes the mouse; Escape and the panel's
-    // own close button are what dismiss it. It is anchored to the top of the
-    // screen, under the navigation, leaving the middle of the map -- where
-    // `goTo` lands a located customer -- clear.
-    <div
-      role="presentation"
-      style={{
-        position: "fixed", inset: 0, zIndex: 900, pointerEvents: "none",
-        display: "flex", alignItems: "flex-start", justifyContent: "center",
-        padding: "4.5rem 1rem 1rem",
-      }}
+  return (
+    <CalciteFlowItem
+      // Mounted means showing: LeftSidebar deselects the summary item in the
+      // same render, so the flow always has exactly one selected step.
+      selected
+      heading={meta.label}
+      description={subtitle}
+      // The flow puts a back arrow on any item past the first, and this is
+      // what it fires: go back to the region's alarm list.
+      onCalciteFlowItemBack={onClose}
     >
-      <div
-        role="dialog"
-        aria-label={`${meta.label} breakdown for ${region}`}
-        style={{
-          pointerEvents: "auto",
-          width: "min(560px, 100%)", maxHeight: "55vh", display: "flex", flexDirection: "column",
-          borderRadius: "6px", overflow: "hidden", boxShadow: "0 18px 48px rgba(0, 0, 0, 0.6)",
-          borderTop: `3px solid ${meta.color}`, background: "var(--calcite-ui-foreground-1)",
-        }}
-      >
-        {/* calcite-panel scrolls its own content area -- the flex sizing is
-            what lets it do that inside a max-height dialog. */}
-        <CalcitePanel
-          heading={meta.label}
-          description={subtitle}
-          closable
-          onCalcitePanelClose={onClose}
-          style={{ flex: 1, minHeight: 0 }}
-        >
-          <CalciteAction
-            slot="header-actions-end"
-            icon="refresh"
-            text="Refresh"
-            title="Re-read lopdetail from GeoServer"
-            scale="s"
-            disabled={status === "loading" ? true : undefined}
-            onClick={refresh}
-          />
+      {/* The row's own colour, carried into the view it opened, so which of
+          the two LOP rows you drilled into is never in doubt. A strip rather
+          than the header's border token: flow-item does not apply that token
+          to the header calcite-panel renders. */}
+      <div style={{ height: "3px", background: meta.color }} />
 
-          {status === "loading" && (
-            <div style={{ padding: "2rem", display: "flex", justifyContent: "center" }}>
-              <CalciteLoader label="Loading LOP causes" scale="m" active />
-            </div>
-          )}
+      <CalciteAction
+        slot="header-actions-end"
+        icon="refresh"
+        text="Refresh"
+        title="Re-read lopdetail from GeoServer"
+        scale="s"
+        disabled={status === "loading" ? true : undefined}
+        onClick={refresh}
+      />
 
-          {status === "error" && (
-            <div style={{ padding: "1rem" }}>
-              <CalciteNotice open kind="danger" icon="exclamation-mark-triangle">
-                <div slot="title">Could not load the breakdown</div>
-                <div slot="message">{error}</div>
-              </CalciteNotice>
-            </div>
-          )}
+      {status === "loading" && (
+        <div style={{ padding: "2rem", display: "flex", justifyContent: "center" }}>
+          <CalciteLoader label="Loading LOP causes" scale="m" active />
+        </div>
+      )}
 
-          {status === "ready" && summary.causes.length === 0 && (
-            <div style={{ padding: "1rem" }}>
-              <CalciteNotice open kind="success" icon="check-circle">
-                <div slot="message">No {meta.label.toLowerCase()} alarms in {region} right now.</div>
-              </CalciteNotice>
-            </div>
-          )}
+      {status === "error" && (
+        <div style={{ padding: "0.75rem" }}>
+          <CalciteNotice open kind="danger" icon="exclamation-mark-triangle" scale="s">
+            <div slot="title">Could not load the breakdown</div>
+            <div slot="message">{error}</div>
+          </CalciteNotice>
+        </div>
+      )}
 
-          {status === "ready" && summary.causes.length > 0 && (
-            <>
-              <div style={{ padding: "0.6rem 0.85rem", display: "flex", alignItems: "center", gap: "0.5rem", borderBottom: "1px solid var(--calcite-ui-border-3, #2d3748)" }}>
-                <CalciteIcon icon="filter" scale="s" />
-                <span style={{ fontSize: "0.65rem", color: "var(--calcite-ui-text-2)" }}>
-                  Select a cause to list its customers and highlight them on the map.
-                </span>
-              </div>
+      {status === "ready" && summary.causes.length === 0 && (
+        <div style={{ padding: "0.75rem" }}>
+          <CalciteNotice open kind="success" icon="check-circle" scale="s">
+            <div slot="message">No {meta.label.toLowerCase()} alarms in {region} right now.</div>
+          </CalciteNotice>
+        </div>
+      )}
 
-              {locateNotice && (
-                <div style={{ padding: "0.75rem 0.85rem 0" }}>
-                  <CalciteNotice open kind="warning" icon="exclamation-mark-triangle" scale="s" closable
-                    onCalciteNoticeClose={() => setLocateNotice("")}>
-                    <div slot="message">{locateNotice}</div>
-                  </CalciteNotice>
-                </div>
-              )}
-
-              <div>
-                {summary.causes.map((cause) => (
-                  <CauseRow
-                    key={cause.code}
-                    cause={cause}
-                    accent={meta.color}
-                    isOpen={openCause === cause.code}
-                    onToggle={() => setOpenCause((current) => (current === cause.code ? null : cause.code))}
-                    onLocate={handleLocate}
-                  />
-                ))}
-              </div>
-            </>
-          )}
-
-          <div slot="footer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", width: "100%" }}>
-            <span style={{ fontSize: "0.6rem", color: "var(--calcite-ui-text-2)" }}>
-              {loadedAt ? `Read ${loadedAt.toLocaleTimeString()}` : " "}
+      {status === "ready" && summary.causes.length > 0 && (
+        <>
+          <div style={{ padding: "0.5rem 0.75rem", display: "flex", alignItems: "center", gap: "0.4rem", borderBottom: BORDER }}>
+            <CalciteIcon icon="cursor-click" scale="s" />
+            <span style={{ fontSize: "0.62rem", color: "var(--calcite-ui-text-2)" }}>
+              Pick a cause to list its customers and highlight them on the map.
             </span>
-            {truncated && (
-              <CalciteChip scale="s" icon="exclamation-mark-triangle" title="Only the first records were read">
-                Truncated
-              </CalciteChip>
-            )}
           </div>
-        </CalcitePanel>
+
+          {locateNotice && (
+            <div style={{ padding: "0.6rem 0.75rem 0" }}>
+              <CalciteNotice open kind="warning" icon="exclamation-mark-triangle" scale="s" closable
+                onCalciteNoticeClose={() => setLocateNotice("")}>
+                <div slot="message">{locateNotice}</div>
+              </CalciteNotice>
+            </div>
+          )}
+
+          {summary.causes.map((cause) => (
+            <CauseRow
+              key={cause.code}
+              cause={cause}
+              accent={meta.color}
+              isOpen={openCause === cause.code}
+              onToggle={() => setOpenCause((current) => (current === cause.code ? null : cause.code))}
+              onLocate={handleLocate}
+            />
+          ))}
+        </>
+      )}
+
+      <div slot="footer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", width: "100%" }}>
+        <span style={{ fontSize: "0.6rem", color: "var(--calcite-ui-text-2)" }}>
+          {loadedAt ? `Read ${loadedAt.toLocaleTimeString()}` : " "}
+        </span>
+        {truncated && (
+          <CalciteChip scale="s" icon="exclamation-mark-triangle" title="Only the first records were read">
+            Truncated
+          </CalciteChip>
+        )}
       </div>
-    </div>,
-    document.body
+    </CalciteFlowItem>
   );
 }
