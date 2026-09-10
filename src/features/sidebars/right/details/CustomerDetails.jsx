@@ -15,6 +15,7 @@ import { useLayers } from "../../../map/state/LayersContext";
 import { useMapView } from "../../../map/state/MapViewContext";
 import { useSelection } from "../../../map/state/SelectionContext";
 import { escapeForCql } from "../../../../shared/constants/faultCodes";
+import { parseLopDetail, UNCLASSIFIED_LOP_CAUSE } from "../../../../shared/constants/lopDetail";
 
 // --- Color / Threshold Config ---
 const NATIVE = {
@@ -59,11 +60,12 @@ const getSystemStatus = (alarmstate) => {
   return { kind: "neutral", icon: "question", label: "Unknown State", isUp: false };
 };
 
-// Extracts just the value from strings like "TypeID= '123'" or "TypeID='ABC'"
-const extractTypeId = (rawText) => {
-  if (!rawText) return "N/A";
-  const match = rawText.match(/TypeID\s*=\s*['"]?([^'"]+)['"]?/i);
-  return match ? match[1] : rawText;
+// The cause code out of a raw `lopdetail` tag ("TypeID= '123'", "ABC", ""),
+// via the shared parser -- the left sidebar's LOP breakdown groups on the
+// same codes, and two regexes for one field would drift apart.
+const lopCauseText = (rawText) => {
+  const { code, raw } = parseLopDetail(rawText);
+  return code === UNCLASSIFIED_LOP_CAUSE ? "N/A" : (code || raw);
 };
 
 const optical_threshold = (data) => {
@@ -482,7 +484,7 @@ export default function CustomerDetails({ feature }) {
                     LOP Cause
                   </div>
                   <div style={{ fontSize: "0.75rem", fontWeight: 700, fontFamily: "var(--calcite-mono-family, monospace)", color: NATIVE.warn }}>
-                    {extractTypeId(data.lopdetail)}
+                    {lopCauseText(data.lopdetail)}
                   </div>
                 </div>
               )}

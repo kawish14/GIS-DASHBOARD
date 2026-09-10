@@ -139,6 +139,11 @@ export default function OntStatusFeed() {
             updatedGraphic.attributes.alarmstate = alert.alarmstate;
             updatedGraphic.attributes.alarminfo = alert.alarminfo;
             updatedGraphic.attributes.perceived_severity = alert.perceived_severity ? alert.perceived_severity : updatedGraphic.attributes.perceived_severity;
+            // Same keep-what-we-have rule as the fields around it: the alert
+            // payload carries lopdetail only for LOP alarms, and dropping it
+            // on every other update would empty the cause breakdown the
+            // sidebar drills into (features/sidebars/left/LopDetailPanel.jsx).
+            updatedGraphic.attributes.lopdetail = alert.lopdetail ? alert.lopdetail : updatedGraphic.attributes.lopdetail;
             updatedGraphic.attributes.lastDownCause = alert.lastDownCause ? alert.lastDownCause : updatedGraphic.attributes.lastDownCause;
             updatedGraphic.attributes.lastdowntime = alert.lastdowntime ? alert.lastdowntime : updatedGraphic.attributes.lastdowntime;
             updatedGraphic.attributes.lastuptime = alert.lastuptime ? alert.lastuptime : updatedGraphic.attributes.lastuptime;
@@ -173,6 +178,7 @@ export default function OntStatusFeed() {
                 fault_time: alert.faultTime,
                 category: alert.category,
                 perceived_severity: alert.perceived_severity,
+                lopdetail: alert.lopdetail,
                 olt: alert.olt, frame: alert.frame, slot: alert.slot, port: alert.port, ontid: alert.ontid
               },
             });

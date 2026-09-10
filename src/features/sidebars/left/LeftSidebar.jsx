@@ -11,6 +11,7 @@ import {
   CalciteLoader,
 } from "@esri/calcite-components-react";
 import RegionStats from "./RegionStats";
+import LopDetailPanel from "./LopDetailPanel";
 import ActiveUsers from "./ActiveUsers";
 import { useStats } from "../../map/state/AlarmStatsContext";
 import { useMapView } from "../../map/state/MapViewContext";
@@ -19,6 +20,7 @@ import { usePermittedRegions } from "../../auth/usePermittedRegions";
 import { useSidebarLayout, usePanelRef } from "../../dashboard/SidebarLayoutContext";
 
 import FeatureGuard from "../../auth/FeatureGuard";
+import { isLopVariant } from "../../../shared/constants/lopDetail";
 
 // Map actions to specific feature keys
 const ACTIONS = [
@@ -90,11 +92,41 @@ export default function LeftSidebar({ hidden = false }) {
   const [highlightedRegions, setHighlightedRegions] = useState({});
   const [selectedFault, setSelectedFault] = useState(null);
 
+  // The Low Optical Power drill-in: which row's `lopdetail` breakdown is
+  // open, and which customers the cause selected inside it covers.
+  //
+  // Both live here rather than in RegionStats because there is one RegionStats
+  // per region tab, all of them mounted at once -- a window owned by a tab
+  // would stay on screen after the user moved to another region, showing the
+  // wrong region's causes. One window, closed on every navigation, cannot.
+  const [lopDrilldown, setLopDrilldown] = useState(null);
+  const [lopCauseIds, setLopCauseIds] = useState(null);
+
   const prevStatsRef = useRef({});
+
+  const openLopDetails = useCallback((region, variant) => {
+    setLopCauseIds(null);
+    setLopDrilldown({ region, variant });
+  }, []);
+
+  // Closing gives the map back: the cause filter goes, and so does the LOP
+  // highlight the row turned on when it opened the window.
+  const closeLopDetails = useCallback(() => {
+    setLopDrilldown(null);
+    setLopCauseIds(null);
+    setSelectedFault((current) => (isLopVariant(current) ? null : current));
+  }, []);
 
   const handlePanelClose = useCallback(() => {
     setSidebarOpen("start", false);
-  }, [setSidebarOpen]);
+    closeLopDetails();
+  }, [setSidebarOpen, closeLopDetails]);
+
+  // Collapsing the sidebar from anywhere else -- the action bar, the right
+  // panel taking the screen -- takes the window with it.
+  useEffect(() => {
+    if (isCollapsed) closeLopDetails();
+  }, [isCollapsed, closeLopDetails]);
 
   // The right panel opened one of its own tools and wants the screen.
   useEffect(() => {
@@ -132,10 +164,16 @@ export default function LeftSidebar({ hidden = false }) {
   const handleTabChange = (e) => {
     const region = e.target.accessKey;
     setTab(region);
+    closeLopDetails(); // the open breakdown belongs to the region being left
+
     if (view && REGION_COORDINATES[region]) view.goTo(REGION_COORDINATES[region]);
   };
 
   const handleActionClick = (toolName) => {
+    // Either branch leaves the Alarm State tab as the user is looking at it,
+    // so the breakdown window goes either way.
+    closeLopDetails();
+
     if (!isCollapsed && activeTool === toolName) {
       setSidebarOpen("start", false);
     } else {
@@ -151,6 +189,7 @@ export default function LeftSidebar({ hidden = false }) {
   if (!realtimeStats || permittedActions.length === 0) return null;
 
   return (
+    <>
     <CalciteShellPanel
       ref={panelRef}
       slot="panel-start"
@@ -208,6 +247,8 @@ export default function LeftSidebar({ hidden = false }) {
                       region={region}
                       selectedFault={selectedFault}
                       setSelectedFault={setSelectedFault}
+                      onOpenLopDetails={(variant) => openLopDetails(region, variant)}
+                      lopCauseIds={lopCauseIds}
                     />
                   )}
                 </CalciteTab>
@@ -226,5 +267,20 @@ export default function LeftSidebar({ hidden = false }) {
 
       </CalcitePanel>
     </CalciteShellPanel>
+
+    {/* The LOP breakdown window. Portals itself over the map, so it renders
+        here purely to be mounted and unmounted with this sidebar. */}
+    {!hidden && lopDrilldown && (
+      <LopDetailPanel
+        // Remounted per row, so the open cause and any notice reset with it
+        // rather than needing an effect to clear them.
+        key={`${lopDrilldown.region}-${lopDrilldown.variant}`}
+        region={lopDrilldown.region}
+        variant={lopDrilldown.variant}
+        onClose={closeLopDetails}
+        onCauseSelect={setLopCauseIds}
+      />
+    )}
+    </>
   );
 }

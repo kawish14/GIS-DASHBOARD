@@ -203,6 +203,17 @@ renders **nothing at all** — that is why a cold start shows no left panel.
 `SelectionContext`; `RightSidebar` opens Details and renders the matching panel
 from `sidebars/right/details/`. Those panels can `pushSelection` to drill in.
 
+**Clicking a Low Optical Power row →** the row is a link, not just a map
+highlight. It selects the fault (so `RegionStats` blooms those points) and
+opens `sidebars/left/LopDetailPanel.jsx`, which portals over the map and
+breaks the same alarm down by its `lopdetail` cause. Selecting a cause there
+lists its customers and hands their ids back to `RegionStats`, which narrows
+the highlight to them -- `RegionStats` stays the only writer of
+`featureEffect`. `LeftSidebar` owns the open window, because there is one
+`RegionStats` per region tab and all of them are mounted at once. Locating a
+customer from the list re-queries the customer layer for the real graphic and
+pushes it onto the selection stack, so the right sidebar opens on it.
+
 **Filtering →** a widget queries, sets a `definitionExpression` or layer-view
 filter, pushes rows into `FeatureTableDataContext`, and publishes a summary to
 `ActiveFiltersContext`. The table appears; the filter bar appears over the map.
@@ -220,7 +231,8 @@ The components that take props at all:
 | Component | Props | Why |
 | --- | --- | --- |
 | `LeftSidebar`, `RightSidebar` | `hidden` | driven by `activeView` (see §8) |
-| `RegionStats` | `region`, `selectedFault`, `setSelectedFault` | the parent's own tab state |
+| `RegionStats` | `region`, `selectedFault`, `setSelectedFault`, `onOpenLopDetails`, `lopCauseIds` | the parent's own tab state, plus the LOP drill-in the parent owns |
+| `LopDetailPanel` | `region`, `variant`, `onClose`, `onCauseSelect` | which alarm row opened it |
 | `sidebars/right/details/*` | `feature` | the entry being rendered |
 | `SymbologyLayer` | `layerKey`, `defaultVisible` | which layer it configures |
 | `FeatureGuard` | `featureKey`, `children`, `fallback` | what it gates |
@@ -240,7 +252,9 @@ The components that take props at all:
 | `features/map/symbology/symbologyPalettes.js` | the colour schemes, with the validation results that justify them |
 | `features/map/symbology/markerIcons.js` | the picture markers the widget can assign, curated so only these bundle |
 | `features/map/widgets/outageAnalysis/diagnose.js` | groups alarms by OLT/PON and decides what broke; pure, no ArcGIS |
+| `features/sidebars/left/useLopBreakdown.js` | one region's LOP customers, read from GeoServer on demand and grouped by `lopdetail`; feeds the drill-in window |
 | `shared/constants/faultCodes.js` | alarm-state codes; use these, never the raw numbers |
+| `shared/constants/lopDetail.js` | the `lopdetail` field: parsing the cause tag, the warning/minor split, and the grouping the breakdown renders |
 | `shared/constants/tableColumns.js` | column definitions for the attribute table |
 
 ---

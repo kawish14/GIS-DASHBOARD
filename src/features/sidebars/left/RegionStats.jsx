@@ -11,7 +11,13 @@ import {
 import { useLayers } from "../../map/state/LayersContext";
 import { useMapView } from "../../map/state/MapViewContext";
 import { useStats } from "../../map/state/AlarmStatsContext";
-import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS } from "../../../shared/constants/faultCodes";
+import {
+  FAULT_CODES,
+  DERIVED_FAULT_CODES,
+  STALE_FAULT_WINDOW_DAYS,
+  escapeForCql,
+} from "../../../shared/constants/faultCodes";
+import { LOP_VARIANTS } from "../../../shared/constants/lopDetail";
 
 /**
  * One region's alarm breakdown, rendered per region tab by LeftSidebar.jsx.
@@ -19,14 +25,33 @@ import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS } from "../..
  * `region` and the selected-fault pair come from the parent because they are
  * the parent's own tab state; the counts are read straight from AlarmStatsContext
  * rather than handed down, since every tab wants the same numbers.
+ *
+ * The two Low Optical Power rows are summary-level on purpose: the cause
+ * breakdown behind them lives in the `lopdetail` field and is a window of its
+ * own (LopDetailPanel.jsx), which the parent opens through `onOpenLopDetails`.
+ * When a cause is selected in that window the parent hands the matching
+ * customer ids back as `lopCauseIds`, and the map highlight below narrows to
+ * them -- this component stays the only writer of `featureEffect`.
  */
-export default function RegionStats({ region, selectedFault, setSelectedFault }) {
+export default function RegionStats({
+  region, selectedFault, setSelectedFault, onOpenLopDetails, lopCauseIds
+}) {
   const { alertCount, realtimeStats } = useStats();
   const { customerLayerView } = useLayers();
   const { view } = useMapView();
 
   const handleFaultClick = (faultType) => {
     setSelectedFault(prev => prev === faultType ? null : faultType);
+  };
+
+  /**
+   * A LOP row is a link into its breakdown, not a toggle: it always selects
+   * the fault (so the map highlights it) and always opens the window. Closing
+   * the window is what clears both -- see LeftSidebar.jsx.
+   */
+  const handleLopClick = (variantKey) => {
+    setSelectedFault(variantKey);
+    onOpenLopDetails?.(variantKey);
   };
 
   useEffect(() => {
@@ -66,13 +91,23 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
         whereClause = "1=1";
     }
 
+    // A cause picked inside the LOP window narrows the same highlight rather
+    // than starting a competing one. Filtering on `id` rather than on
+    // `lopdetail` is deliberate: the field is absent from the layer's schema
+    // whenever the batch it inferred from carried no LOP rows, and a where
+    // clause naming a field that isn't there throws.
+    if (lopCauseIds?.length) {
+      const idList = lopCauseIds.map((id) => `'${escapeForCql(id)}'`).join(",");
+      whereClause = `(${whereClause}) AND id IN (${idList})`;
+    }
+
     customerLayerView.featureEffect = {
       filter: { where: whereClause },
       includedEffect: "bloom(0.9, 0.6pt, 1) ",
       excludedEffect: "blur(2px) opacity(0.3) "
     };
 
-  }, [selectedFault, customerLayerView]);
+  }, [selectedFault, customerLayerView, lopCauseIds]);
 
   // 1. Data Extraction
   const onlineCount = alertCount?.[region]?.Online || 0;
@@ -92,11 +127,19 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
   const totalCriticalFaults = Object.values(CriticalFaultData).reduce((a, b) => a + b, 0);
   const totalOtherFaults = Object.values(OtherFaultData).reduce((a, b) => a + b, 0);
 
-  // Helper to determine item style based on selection
-  const getHighlightStyle = (faultType) => {
+  // Helper to determine item style based on selection.
+  //
+  // `stayClickable` is for the drill-in rows: a selected fault normally puts
+  // the others beyond reach, but the breakdown window doesn't cover the
+  // sidebar, and switching between the two LOP rows is the move a user is
+  // most likely to make while it is open. They still dim -- they just answer.
+  const getHighlightStyle = (faultType, { stayClickable = false } = {}) => {
     if (!selectedFault) return "transition-all duration-300 opacity-100 cursor-pointer";
-    return selectedFault === faultType
-      ? "transition-all duration-300 opacity-100 scale-[1.02] z-10 bg-[var(--calcite-ui-foreground-2)] cursor-pointer"
+    if (selectedFault === faultType) {
+      return "transition-all duration-300 opacity-100 scale-[1.02] z-10 bg-[var(--calcite-ui-foreground-2)] cursor-pointer";
+    }
+    return stayClickable
+      ? "transition-all duration-300 opacity-40 grayscale-[0.5] cursor-pointer"
       : "transition-all duration-300 opacity-30 grayscale-[0.5] blur-[0.5px] pointer-events-none cursor-default";
   };
 
@@ -188,29 +231,41 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
               </CalciteListItem>
             )}
 
+            {/* Both LOP rows open the cause breakdown. The chevron beside the
+                count is the affordance; `fault-drilldown` (index.css) is the
+                rest of it -- pointer cursor, and the chevron sliding and
+                brightening on hover. */}
             {CriticalFaultData.lopMinor > 0 && (
               <CalciteListItem
-                className={getHighlightStyle(DERIVED_FAULT_CODES.LOP_MINOR)}
-                onClick={() => handleFaultClick(DERIVED_FAULT_CODES.LOP_MINOR)}
-                label="Low Optical Power"
-                description="Remote optical transceiver parameters exceed alarm threshold"
+                className={`fault-drilldown ${getHighlightStyle(DERIVED_FAULT_CODES.LOP_MINOR, { stayClickable: true })}`}
+                onClick={() => handleLopClick(DERIVED_FAULT_CODES.LOP_MINOR)}
+                label={LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_MINOR].label}
+                description={LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_MINOR].description}
+                title="Open the LOP cause breakdown"
               >
-                <CalciteChip slot="content-end" scale="s" style={{"--calcite-chip-background-color": "#e6ff04", "--calcite-chip-text-color": "black"}}>
-                  {CriticalFaultData.lopMinor}
-                </CalciteChip>
+                <div slot="content-end" className="flex items-center gap-1">
+                  <CalciteChip scale="s" style={{"--calcite-chip-background-color": LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_MINOR].color, "--calcite-chip-text-color": "black"}}>
+                    {CriticalFaultData.lopMinor}
+                  </CalciteChip>
+                  <CalciteIcon icon="chevron-right" scale="s" />
+                </div>
               </CalciteListItem>
             )}
 
             {CriticalFaultData.lopWarning > 0 && (
               <CalciteListItem
-                className={getHighlightStyle(DERIVED_FAULT_CODES.LOP_WARNING)}
-                onClick={() => handleFaultClick(DERIVED_FAULT_CODES.LOP_WARNING)}
-                label="Low Optical Power (Warning)"
-                description="Remote optical transceiver parameters exceed warning threshold"
+                className={`fault-drilldown ${getHighlightStyle(DERIVED_FAULT_CODES.LOP_WARNING, { stayClickable: true })}`}
+                onClick={() => handleLopClick(DERIVED_FAULT_CODES.LOP_WARNING)}
+                label={LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_WARNING].label}
+                description={LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_WARNING].description}
+                title="Open the LOP cause breakdown"
               >
-                <CalciteChip slot="content-end" scale="s" style={{"--calcite-chip-background-color": "#bff705", "--calcite-chip-text-color": "black"}}>
-                  {CriticalFaultData.lopWarning}
-                </CalciteChip>
+                <div slot="content-end" className="flex items-center gap-1">
+                  <CalciteChip scale="s" style={{"--calcite-chip-background-color": LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_WARNING].color, "--calcite-chip-text-color": "black"}}>
+                    {CriticalFaultData.lopWarning}
+                  </CalciteChip>
+                  <CalciteIcon icon="chevron-right" scale="s" />
+                </div>
               </CalciteListItem>
             )}
           </CalciteList>
