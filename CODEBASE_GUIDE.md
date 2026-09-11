@@ -235,7 +235,10 @@ customers" scope registers its own layer (`Customers_test_WFS`, labelled
 in the layer list, its points open `CustomerDetails`, and the selection tool
 can return them. For a service area that layer is built from a bounding-box
 read narrowed to the real polygon in the browser — a CQL `INTERSECTS` would
-have to carry a few thousand vertices through a URL.
+have to carry a few thousand vertices through a URL. Both pickers are shaped
+by `features/filters/serviceAreas.js`: `pop_boundary` holds one row per
+polygon, so a POP drawn in five pieces appeared five times until the rows were
+grouped by `pop_id` and their polygons unioned.
 
 **The table →** `FeatureTable` renders a tab per visible entry. Clicking a tab
 frames that tab's features; clicking a row zooms to and marks that one. Only
@@ -274,6 +277,7 @@ The components that take props at all:
 | `features/map/symbology/markerIcons.js` | the picture markers the widget can assign, curated so only these bundle |
 | `features/map/widgets/outageAnalysis/diagnose.js` | groups alarms by OLT/PON and decides what broke; pure, no ArcGIS |
 | `features/sidebars/left/useLopBreakdown.js` | one region's LOP alarms, read from GeoServer the first time a row is expanded and counted by `lopdetail` |
+| `features/filters/serviceAreas.js` | one picker entry per POP service area rather than per polygon, and the region grouping both of the OLT/POP filter's pickers use; pure |
 | `features/map/state/selectableLayers.js` | which layers a selection draws from — the defaults, and the visible/selectable/queryable rule both the layer list and the selection widget use; pure, no ArcGIS |
 | `shared/constants/faultCodes.js` | alarm-state codes; use these, never the raw numbers |
 | `shared/constants/lopDetail.js` | the `lopdetail` field: parsing the cause tag, the warning/minor split, and the counting the breakdown renders |

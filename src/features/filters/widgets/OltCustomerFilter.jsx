@@ -15,7 +15,7 @@
  * it appears in the layer list, its points open CustomerDetails, and the
  * selection tool can return them.
  */
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   CalciteLabel,
   CalciteSelect,
@@ -25,6 +25,7 @@ import {
   CalciteNotice,
   CalciteCombobox,
   CalciteComboboxItem,
+  CalciteComboboxItemGroup,
   CalciteSegmentedControl,
   CalciteSegmentedControlItem
 } from "@esri/calcite-components-react";
@@ -37,6 +38,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { Realtime, api } from '../../../shared/config/runtimeConfig';
 import { customerColumns } from '../../../shared/constants/tableColumns';
 import { FILTERED_CUSTOMER_LAYER_TITLE } from '../../../shared/constants/layerLabels';
+import { mergeServiceAreas, groupByRegion } from '../serviceAreas';
 
 // Which question the widget is asking.
 const MODE_OLT = "OLT";
@@ -125,18 +127,7 @@ export default function OltCustomerFilter() {
         const { features } = await popLayer.queryFeatures(query);
         if (!isMounted) return;
 
-        const areas = features
-          .filter((feature) => feature.geometry)
-          .map((feature) => ({
-            id: String(feature.attributes.pop_id ?? feature.attributes.pop_name ?? ""),
-            name: feature.attributes.pop_name || feature.attributes.pop_id || "Unnamed area",
-            region: feature.attributes.region || "",
-            geometry: feature.geometry,
-          }))
-          .filter((area) => area.id)
-          .sort((a, b) => a.name.localeCompare(b.name));
-
-        setPopAreas(areas);
+        setPopAreas(mergeServiceAreas(features));
       } catch (err) {
         console.error("Failed to read POP service areas:", err);
         // Let switching back into this mode try again.
@@ -189,6 +180,16 @@ export default function OltCustomerFilter() {
     }
     return featureSet.features.length;
   };
+
+  // One entry per OLT: the endpoint lists a row per shelf, so an OLT with
+  // several of them used to appear that many times in the picker.
+  const oltGroups = useMemo(() => {
+    const unique = new Map();
+    oltList.forEach((item) => {
+      if (item?.olt && !unique.has(item.olt)) unique.set(item.olt, item);
+    });
+    return [...unique.values()];
+  }, [oltList]);
 
   const currentParams = JSON.stringify({ mode, selectedOlt, selectedPop, filterScope });
   const isCached = tableData?.olt?.filterParams === currentParams;
@@ -406,8 +407,17 @@ export default function OltCustomerFilter() {
                   setSelectedOlt(selectedItems.length > 0 ? selectedItems[0].value : "");
                 }}
               >
-                {oltList.map((item, index) => (
-                  <CalciteComboboxItem key={`${item.olt}-${index}`} value={item.olt} textLabel={`${item.olt} (${item.region})`} selected={selectedOlt === item.olt} />
+                {groupByRegion(oltGroups).map(([region, items]) => (
+                  <CalciteComboboxItemGroup key={region} label={region}>
+                    {items.map((item) => (
+                      <CalciteComboboxItem
+                        key={item.olt}
+                        value={item.olt}
+                        heading={item.olt}
+                        selected={selectedOlt === item.olt ? true : undefined}
+                      />
+                    ))}
+                  </CalciteComboboxItemGroup>
                 ))}
               </CalciteCombobox>
             </CalciteLabel>
@@ -425,13 +435,24 @@ export default function OltCustomerFilter() {
                   setSelectedPop(selectedItems.length > 0 ? selectedItems[0].value : "");
                 }}
               >
-                {popAreas.map((area) => (
-                  <CalciteComboboxItem
-                    key={area.id}
-                    value={area.id}
-                    textLabel={area.region ? `${area.name} (${area.region})` : area.name}
-                    selected={selectedPop === area.id}
-                  />
+                {groupByRegion(popAreas).map(([region, areas]) => (
+                  <CalciteComboboxItemGroup key={region} label={region}>
+                    {areas.map((area) => (
+                      <CalciteComboboxItem
+                        key={area.id}
+                        value={area.id}
+                        heading={area.name}
+                        // Only what the name doesn't already say: the id when
+                        // two areas share a name, and the piece count when an
+                        // area is drawn in more than one polygon.
+                        description={[
+                          area.ambiguous ? area.id : null,
+                          area.parts > 1 ? `${area.parts} parts` : null,
+                        ].filter(Boolean).join(" · ") || undefined}
+                        selected={selectedPop === area.id ? true : undefined}
+                      />
+                    ))}
+                  </CalciteComboboxItemGroup>
                 ))}
               </CalciteCombobox>
             </CalciteLabel>
