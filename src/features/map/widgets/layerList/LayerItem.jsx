@@ -41,7 +41,7 @@ const getLayerIcon = (layer) => {
 
 export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle }) {
   const initialTitle = LAYER_LABELS[layer.title] || layer.title;
-  const { layers } = useLayers();
+  const { layers, isLayerSelectable, setLayerSelectable } = useLayers();
   const { user } = useAuth(); // <-- NEW: Get user from Auth
   const [isVisible, setIsVisible] = useState(layer.visible);
   const [opacity, setOpacity] = useState(layer.opacity || 1);
@@ -103,6 +103,11 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
     setLabelsVisible(isChecked);
   };
 
+  // Only layers the selection tool can actually query offer the switch --
+  // tiles and group layers have no features to return.
+  const isQueryable = typeof layer.queryFeatures === "function";
+  const isSelectable = isLayerSelectable(layer.title);
+
   // Map Navigation Function
   const navigateToRegion = (regionTitle) => {
     const target = REGION_VIEWS[regionTitle];
@@ -163,6 +168,25 @@ export default function LayerItem({ layer, view, LAYER_LABELS, isOpen, onToggle 
                   </CalciteButton>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Selection Toggle -- which layers the selection tool draws from.
+              Customers are on by default; everything else is opt-in here. A
+              hidden layer is never selected whatever this says, since it is
+              not on the map to be picked. */}
+          {isQueryable && (
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CalciteIcon icon="select" scale="s" className="text-gray-500" />
+                <span className="text-gray-200 text-sm">Include in selection</span>
+              </div>
+              <CalciteSwitch
+                checked={isSelectable ? true : undefined}
+                disabled={!isVisible ? true : undefined}
+                title={isVisible ? "Let the selection tool return this layer's features" : "Show the layer first -- hidden layers are never selected"}
+                onCalciteSwitchChange={(e) => setLayerSelectable(layer.title, e.target.checked)}
+              />
             </div>
           )}
 

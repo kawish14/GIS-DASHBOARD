@@ -12,6 +12,8 @@ import { useLayers } from "../../map/state/LayersContext";
 import { useMapView } from "../../map/state/MapViewContext";
 import { useStats } from "../../map/state/AlarmStatsContext";
 import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS } from "../../../shared/constants/faultCodes";
+import { LOP_VARIANTS, isLopVariant } from "../../../shared/constants/lopDetail";
+import LopCauseStats from "./LopCauseStats";
 
 /**
  * One region's alarm breakdown, rendered per region tab by LeftSidebar.jsx.
@@ -19,6 +21,12 @@ import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS } from "../..
  * `region` and the selected-fault pair come from the parent because they are
  * the parent's own tab state; the counts are read straight from AlarmStatsContext
  * rather than handed down, since every tab wants the same numbers.
+ *
+ * The two Low Optical Power rows carry a second level: the `lopdetail` field
+ * says which cause each of those alarms was raised for, and expanding a row
+ * shows that split (LopCauseStats.jsx) underneath it. It stays a count of
+ * counts -- no customer list, no navigation, nothing that moves the panel off
+ * the alarm summary the user came here for.
  */
 export default function RegionStats({ region, selectedFault, setSelectedFault }) {
   const { alertCount, realtimeStats } = useStats();
@@ -27,6 +35,26 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
 
   const handleFaultClick = (faultType) => {
     setSelectedFault(prev => prev === faultType ? null : faultType);
+  };
+
+  // Which LOP row has its cause breakdown showing, if any. Local because it
+  // is this tab's view state: each region tab keeps its own, and none of them
+  // outlives the tab the way a shared panel would.
+  const [expandedLop, setExpandedLop] = useState(null);
+
+  /**
+   * A LOP row does two things with one click: the map highlight every fault
+   * row applies, and brings its cause breakdown to the front of the panel.
+   */
+  const handleLopClick = (variantKey) => {
+    handleFaultClick(variantKey);
+    setExpandedLop((current) => (current === variantKey ? null : variantKey));
+  };
+
+  /** Dismissing the breakdown also releases the map highlight it came with. */
+  const closeLopStats = () => {
+    setExpandedLop(null);
+    setSelectedFault((current) => (isLopVariant(current) ? null : current));
   };
 
   useEffect(() => {
@@ -89,14 +117,33 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
     gpl: realtimeStats?.[region]?.[FAULT_CODES.GPL] || 0,
   }
 
+  // The two LOP rows, paired with their counts, so the markup below renders
+  // them the same way instead of twice over.
+  const lopRows = [
+    { variant: LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_MINOR], count: CriticalFaultData.lopMinor },
+    { variant: LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_WARNING], count: CriticalFaultData.lopWarning },
+  ].filter((row) => row.count > 0);
+
+  // An expanded row whose count has since dropped to zero is no longer on
+  // screen, and its breakdown must not outlive it.
+  const expandedLopRow = lopRows.find((row) => row.variant.key === expandedLop);
+
   const totalCriticalFaults = Object.values(CriticalFaultData).reduce((a, b) => a + b, 0);
   const totalOtherFaults = Object.values(OtherFaultData).reduce((a, b) => a + b, 0);
 
-  // Helper to determine item style based on selection
-  const getHighlightStyle = (faultType) => {
+  // Helper to determine item style based on selection.
+  //
+  // `stayClickable` is for the drill-in rows: a selected fault normally puts
+  // the others beyond reach, but coming back from a breakdown to pick the
+  // other LOP row is the move a user is most likely to make. They still dim --
+  // they just answer.
+  const getHighlightStyle = (faultType, { stayClickable = false } = {}) => {
     if (!selectedFault) return "transition-all duration-300 opacity-100 cursor-pointer";
-    return selectedFault === faultType
-      ? "transition-all duration-300 opacity-100 scale-[1.02] z-10 bg-[var(--calcite-ui-foreground-2)] cursor-pointer"
+    if (selectedFault === faultType) {
+      return "transition-all duration-300 opacity-100 scale-[1.02] z-10 bg-[var(--calcite-ui-foreground-2)] cursor-pointer";
+    }
+    return stayClickable
+      ? "transition-all duration-300 opacity-40 grayscale-[0.5] cursor-pointer"
       : "transition-all duration-300 opacity-30 grayscale-[0.5] blur-[0.5px] pointer-events-none cursor-default";
   };
 
@@ -131,8 +178,14 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
     return () => clearTimeout(timer);
   }, [totalCriticalFaults, region]);
 
+  const isLopOpen = Boolean(expandedLopRow);
+
   return (
-    <div className="flex flex-col h-full bg-[var(--calcite-ui-foreground-1)]">
+    <div className="relative flex flex-col h-full bg-[var(--calcite-ui-foreground-1)]">
+      {/* Everything the panel normally shows. While a LOP breakdown is up it
+          steps back -- dimmed and blurred, the same language the fault rows
+          already use for "not the thing you are looking at". */}
+      <div className={`flex flex-col h-full transition-all duration-300 ${isLopOpen ? "opacity-40 blur-[2px] grayscale-[0.4] pointer-events-none" : ""}`}>
       {/* SECTION B: OPERATIONAL STATUS */}
       <CalciteBlock scale="s" heading="Operational Status" open collapsible>
         <CalciteIcon slot="icon" icon="check-circle" style={{'--calcite-ui-icon-color': 'rgba(0, 255, 94, 0.95)'}} />
@@ -188,31 +241,27 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
               </CalciteListItem>
             )}
 
-            {CriticalFaultData.lopMinor > 0 && (
+            {/* Both LOP rows bring their cause breakdown to the front rather
+                than unfolding under themselves -- see the overlay below. The
+                chevron is the affordance; `fault-drilldown` (index.css) is the
+                rest of it, pointer cursor and a nudge on hover. */}
+            {lopRows.map(({ variant, count }) => (
               <CalciteListItem
-                className={getHighlightStyle(DERIVED_FAULT_CODES.LOP_MINOR)}
-                onClick={() => handleFaultClick(DERIVED_FAULT_CODES.LOP_MINOR)}
-                label="Low Optical Power"
-                description="Remote optical transceiver parameters exceed alarm threshold"
+                key={variant.key}
+                className={`fault-drilldown ${getHighlightStyle(variant.key, { stayClickable: true })}`}
+                onClick={() => handleLopClick(variant.key)}
+                label={variant.label}
+                description={variant.description}
+                title="Show the cause breakdown"
               >
-                <CalciteChip slot="content-end" scale="s" style={{"--calcite-chip-background-color": "#e6ff04", "--calcite-chip-text-color": "black"}}>
-                  {CriticalFaultData.lopMinor}
-                </CalciteChip>
+                <div slot="content-end" className="flex items-center gap-1">
+                  <CalciteChip scale="s" style={{"--calcite-chip-background-color": variant.color, "--calcite-chip-text-color": "black"}}>
+                    {count}
+                  </CalciteChip>
+                  <CalciteIcon icon="chevron-right" scale="s" />
+                </div>
               </CalciteListItem>
-            )}
-
-            {CriticalFaultData.lopWarning > 0 && (
-              <CalciteListItem
-                className={getHighlightStyle(DERIVED_FAULT_CODES.LOP_WARNING)}
-                onClick={() => handleFaultClick(DERIVED_FAULT_CODES.LOP_WARNING)}
-                label="Low Optical Power (Warning)"
-                description="Remote optical transceiver parameters exceed warning threshold"
-              >
-                <CalciteChip slot="content-end" scale="s" style={{"--calcite-chip-background-color": "#bff705", "--calcite-chip-text-color": "black"}}>
-                  {CriticalFaultData.lopWarning}
-                </CalciteChip>
-              </CalciteListItem>
-            )}
+            ))}
           </CalciteList>
         )}
       </CalciteBlock>
@@ -266,6 +315,26 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
         )}
 
       </CalciteBlock>
+      </div>
+
+      {/* The breakdown itself, in front of the blurred panel. Clicking the
+          backdrop puts it away, as does the block's own close button. */}
+      {isLopOpen && (
+        <>
+          <div
+            role="presentation"
+            onClick={closeLopStats}
+            className="absolute inset-0 z-10"
+          />
+          <div className="absolute inset-x-2 top-3 z-20">
+            <LopCauseStats
+              region={region}
+              variant={expandedLopRow.variant.key}
+              onClose={closeLopStats}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

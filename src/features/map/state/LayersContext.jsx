@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
+import { isSelectableByDefault } from "./selectableLayers";
 
 /**
  * The operational layers currently on the map, keyed by id.
@@ -7,8 +8,11 @@ import { createContext, useContext, useState, useEffect, useMemo, useCallback } 
  *             own layer on mount and unregisters on unmount, so this map is
  *             always what is actually on screen.
  *             `customerLayerView` is set by features/map/useCustomerLayerLoading.js.
+ *             Which layers the selection tool draws from is written by the
+ *             layer list (features/map/widgets/layerList/LayerItem.jsx).
  * READ BY     filter widgets (to query and set definitionExpression), the
- *             layer list, RegionStats (featureEffect), GlobalClickHandler.
+ *             layer list, RegionStats (featureEffect), GlobalClickHandler,
+ *             SelectionWidget (which layers to query).
  *
  * Takes `view` as a prop rather than calling useMapView() so it can tear the
  * registry down when the view goes away -- see MapProvider.jsx.
@@ -19,6 +23,9 @@ export function LayersProvider({ children, view }) {
   const [layers, setLayers] = useState({});
   const [layerView, setLayerView] = useState({});
   const [customerLayerView, setCustomerLayerView] = useState(null);
+  // Only the layers the user has actually changed; everything else falls back
+  // to the default above, so a layer added later still behaves predictably.
+  const [selectableOverrides, setSelectableOverrides] = useState({});
 
   const registerLayer = useCallback((id, instance) => {
     setLayers(prev => {
@@ -39,11 +46,21 @@ export function LayersProvider({ children, view }) {
     });
   }, [view]);
 
+  const isLayerSelectable = useCallback(
+    (title) => selectableOverrides[title] ?? isSelectableByDefault(title),
+    [selectableOverrides]
+  );
+
+  const setLayerSelectable = useCallback((title, selectable) => {
+    setSelectableOverrides(prev => ({ ...prev, [title]: selectable }));
+  }, []);
+
   useEffect(() => {
     if (!view) {
       setLayers({});
       setLayerView({});
       setCustomerLayerView(null);
+      setSelectableOverrides({});
     }
   }, [view]);
 
@@ -51,7 +68,11 @@ export function LayersProvider({ children, view }) {
     layers, registerLayer, unregisterLayer,
     layerView, setLayerView,
     customerLayerView, setCustomerLayerView,
-  }), [layers, registerLayer, unregisterLayer, layerView, customerLayerView]);
+    isLayerSelectable, setLayerSelectable,
+  }), [
+    layers, registerLayer, unregisterLayer, layerView, customerLayerView,
+    isLayerSelectable, setLayerSelectable,
+  ]);
 
   return <LayersContext.Provider value={value}>{children}</LayersContext.Provider>;
 }

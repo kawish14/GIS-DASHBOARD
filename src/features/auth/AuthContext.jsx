@@ -1,14 +1,4 @@
-/**
- * The signed-in user, their permissions, and the session lifecycle.
- *
- * The user object carries `permissions.features` (per-tab and per-tool keys,
- * checked through hasPermission / FeatureGuard), `permissions.regions` (see
- * usePermittedRegions.js) and `permissions.layers`.
- *
- * Mounted at the top of app/AppProviders.jsx because routing, the dashboard
- * and every gated widget depend on it. The session is re-checked every ten
- * minutes and the user is logged out after twenty minutes idle.
- */
+
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { authenticate } from "../../shared/config/runtimeConfig";

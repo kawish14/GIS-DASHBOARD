@@ -11,9 +11,9 @@ import { Realtime } from "../../../url";
 import imgZero from "../../assets/images/zero.png";
 import imgOne from "../../assets/images/one.png";
 import imgTwo from "../../assets/images/two.png";
-import imgTwo1 from "../../assets/images/two_1.png";
+import imgTwo1 from "../../assets/images/two_1.PNG";
 import imgThree from "../../assets/images/three.png";
-import imgFour from "../../assets/images/four.png";
+import imgFour from "../../assets/images/four.PNG";
 
 export default function Customer() {
   const { layers, view, setPopupFeature, popupFeature } = useArcGIS();

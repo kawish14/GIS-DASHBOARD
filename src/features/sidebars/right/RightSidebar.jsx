@@ -33,6 +33,8 @@ import SiteDetails from "./details/SiteDetails";
 import LonghaulDetails from "./details/LonghaulDetails";
 import ParcelDetails from "./details/ParcelDetails";
 import CoordinateDetails from './details/CoordinateDetails';
+import CoincidentFeaturePager from './CoincidentFeaturePager';
+import { layerLabel, OLT_CUSTOMER_LAYER_TITLE } from '../../../shared/constants/layerLabels';
 import FspOutageAnalyzer from '../../map/widgets/FspOutageAnalyzer';
 import InactiveCustomerFilter from '../../filters/widgets/InactiveCustomerFilter';
 import DensityMapToggle from '../../map/widgets/DensityMapToggle';
@@ -74,7 +76,7 @@ export const featureMeta = [
 export default function RightSidebar({ hidden = false }) {
   const {
     selectionStack, activeSelectionId, setActiveSelectionId, closeSelection, clearAllSelections,
-    updateSelectionFeature, parcelFeature, setParcelFeature,
+    updateSelectionFeature, setEntryCandidate, parcelFeature, setParcelFeature,
   } = useSelection();
   const activeEntry = useMemo(
     () => selectionStack.find(e => e.id === activeSelectionId) || null,
@@ -120,6 +122,16 @@ export default function RightSidebar({ hidden = false }) {
     });
   }, [hasPermission]);
 
+  // Permissions can change while the user is signed in -- the server now
+  // refreshes them from the role on every request -- so the tool that is open
+  // may be one they have just lost. Fall back to whatever they do still have,
+  // rather than leaving the panel showing a heading with nothing under it.
+  useEffect(() => {
+    if (permittedActions.length === 0) return;
+    if (permittedActions.some((a) => a.text === activeTool)) return;
+    setActiveTool(permittedActions[0].text);
+  }, [permittedActions, activeTool]);
+
   useEffect(() => {
     if (popupFeature || parcelFeature) {
       const canViewDetails = permittedActions.some(a => a.text === DETAILS_TOOL);
@@ -152,7 +164,8 @@ export default function RightSidebar({ hidden = false }) {
   const handleTabClick = useCallback(async (entry) => {
     setActiveSelectionId(entry.id);
     if (!view) return;
-    let target = entry.feature;
+    const original = entry.feature;
+    let target = original;
     if (target && !target.geometry && target.layer) {
       try {
         const layer = target.layer;
@@ -167,7 +180,7 @@ export default function RightSidebar({ hidden = false }) {
           if (results.features?.length) {
             target = results.features[0];
             target.layer = layer;
-            updateSelectionFeature(entry.id, target);
+            updateSelectionFeature(entry.id, target, original);
           }
         }
       } catch (err) {
@@ -237,7 +250,8 @@ export default function RightSidebar({ hidden = false }) {
                 const fullFeature = results.features[0];
                 fullFeature.layer = layer;
                 fullFeature.isFullyLoaded = true;
-                if (entryId != null) updateSelectionFeature(entryId, fullFeature);
+                // popupFeature is the candidate this query was started for.
+                if (entryId != null) updateSelectionFeature(entryId, fullFeature, popupFeature);
              }
           }
         } catch (error) {
@@ -257,6 +271,11 @@ export default function RightSidebar({ hidden = false }) {
       const title = popupFeature.layer?.title;
       switch (title) {
         case "Customers_inactive": return <InactiveCustomerDetails feature={popupFeature} />;
+        // The OLT filter's "all customers" layer is the customer layer under
+        // another title, so a point on it opens the same panel. Without this
+        // it fell through to "No renderer found", which is what clicking a
+        // filtered customer used to do.
+        case OLT_CUSTOMER_LAYER_TITLE:
         case "Customers_test": return <CustomerDetails feature={popupFeature} />;
         case "pop": return <PopDetails feature={popupFeature} />;
         case "dc_odb": return <DcDetails feature={popupFeature} />;
@@ -336,38 +355,62 @@ export default function RightSidebar({ hidden = false }) {
         
         {/* --- DETAILS TAB --- */}
         <FeatureGuard featureKey="tab_Details">
-          <div style={{ display: activeTool === DETAILS_TOOL ? "block" : "none" }}>
-            {selectionStack.length > 1 && (
-              <div style={{ display: "flex", gap: "4px", padding: "6px 8px", overflowX: "auto", borderBottom: "1px solid var(--calcite-ui-border-3)" }}>
-                {selectionStack.map((entry, idx) => {
-                  const isActive = entry.id === activeSelectionId;
-                  const idLabel = entry.feature?.attributes?.id ?? entry.feature?.attributes?.name ?? "";
-                  return (
-                    <div
-                      key={entry.id}
-                      onClick={() => handleTabClick(entry)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: "4px", padding: "4px 8px",
-                        borderRadius: "6px", cursor: "pointer", fontSize: "0.72rem", whiteSpace: "nowrap",
-                        background: isActive ? "var(--calcite-ui-brand)" : "var(--calcite-ui-foreground-2)",
-                        color: isActive ? "#fff" : "var(--calcite-ui-text-1)",
-                      }}
-                    >
-                      <span>[{idx + 1}] {entry.label === "Customers_test" ? "Customers" : entry.label}{idLabel ? `: ${idLabel}` : ""}</span>
-                      <CalciteAction scale="m" icon="x" appearance="transparent" onClick={(e) => { e.stopPropagation(); closeSelection(entry.id); }} />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {(popupFeature || parcelFeature) && (
-              <div style={{ display: "flex", justifyContent: "flex-end", padding: "0.25rem 0.5rem", borderBottom: "1px solid var(--calcite-ui-border-3)", backgroundColor: "var(--calcite-ui-foreground-2)" }}>
-                 <CalciteButton appearance="transparent" iconStart="magnifying-glass-plus" scale="m" kind="neutral" onClick={handleZoomToActiveFeature}>
-                    Zoom to Feature
-                 </CalciteButton>
-              </div>
-            )}
-            {renderFeatureDetails()}
+          {/* Fills the panel's content area -- a column flex box with a
+              definite height -- so the pager at the bottom holds the panel's
+              bottom edge. Left in normal flow it rides up under whatever the
+              details happen to be at the time, which meant it jumped every
+              time a page loaded. */}
+          <div
+            style={{
+              display: activeTool === DETAILS_TOOL ? "flex" : "none",
+              flex: "1 1 auto",
+              flexDirection: "column",
+              minHeight: 0,
+            }}
+          >
+            {/* Only the details scroll; the pager below is outside this box. */}
+            <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+              {selectionStack.length > 1 && (
+                <div style={{ display: "flex", gap: "4px", padding: "6px 8px", overflowX: "auto", borderBottom: "1px solid var(--calcite-ui-border-3)" }}>
+                  {selectionStack.map((entry, idx) => {
+                    const isActive = entry.id === activeSelectionId;
+                    const idLabel = entry.feature?.attributes?.id ?? entry.feature?.attributes?.name ?? "";
+                    return (
+                      <div
+                        key={entry.id}
+                        onClick={() => handleTabClick(entry)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "4px", padding: "4px 8px",
+                          borderRadius: "6px", cursor: "pointer", fontSize: "0.72rem", whiteSpace: "nowrap",
+                          background: isActive ? "var(--calcite-ui-brand)" : "var(--calcite-ui-foreground-2)",
+                          color: isActive ? "#fff" : "var(--calcite-ui-text-1)",
+                        }}
+                      >
+                        <span>[{idx + 1}] {layerLabel(entry.label)}{idLabel ? `: ${idLabel}` : ""}</span>
+                        <CalciteAction scale="m" icon="x" appearance="transparent" onClick={(e) => { e.stopPropagation(); closeSelection(entry.id); }} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {(popupFeature || parcelFeature) && (
+                <div style={{ display: "flex", justifyContent: "flex-end", padding: "0.25rem 0.5rem", borderBottom: "1px solid var(--calcite-ui-border-3)", backgroundColor: "var(--calcite-ui-foreground-2)" }}>
+                   <CalciteButton appearance="transparent" iconStart="magnifying-glass-plus" scale="m" kind="neutral" onClick={handleZoomToActiveFeature}>
+                      Zoom to Feature
+                   </CalciteButton>
+                </div>
+              )}
+              {renderFeatureDetails()}
+            </div>
+            {/* Held at the bottom of the panel, out of the scrolling box: the
+                click that opened this panel may have landed on several
+                stacked features, and this is how you reach the rest. */}
+            <CoincidentFeaturePager
+              entryId={activeEntry?.id}
+              candidates={activeEntry?.candidates}
+              index={activeEntry?.candidateIndex ?? 0}
+              onSelect={(next) => activeEntry && setEntryCandidate(activeEntry.id, next)}
+            />
           </div>
         </FeatureGuard>
 

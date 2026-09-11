@@ -1,12 +1,19 @@
 /**
- * Selection Tools -- draw a shape, get the customers inside it.
+ * Selection Tools -- draw a shape, get the features inside it.
  *
- * The output of this widget is a *set of features*: highlighted on the map and
- * pushed to the feature table as the "Spatial Selection" tab. It deliberately
- * reports nothing about the shape itself -- how long the line was or how many
- * square kilometres the polygon covered is the measure tool's job
- * (widgets/MeasurementWidget.jsx), and showing both here is what made the two
- * tools read as the same thing.
+ * Which features depends on the map, not on this file: every layer that is
+ * *visible* and marked "Include in selection" in the layer list is queried,
+ * and each one that hits gets its own tab in the feature table. Customers are
+ * the only layers on by default (see LayersContext), so out of the box this
+ * behaves as it always did -- but a layer switched off in the layer list is
+ * now genuinely out of the selection, where before the customer layer was
+ * queried whether or not anyone could see it.
+ *
+ * The output is a *set of features*: highlighted on the map and pushed to the
+ * table. It deliberately reports nothing about the shape itself -- how long
+ * the line was or how many square kilometres the polygon covered is the
+ * measure tool's job (widgets/MeasurementWidget.jsx), and showing both here is
+ * what made the two tools read as the same thing.
  *
  * Selection graphics are cyan and solid; measurement graphics are amber and
  * dashed. Both sketch on the same MapView, so they hand the map back and forth
@@ -29,11 +36,22 @@ import {
 } from "@esri/calcite-components-react";
 import { api } from "../../../shared/config/runtimeConfig";
 import { customerColumns } from '../../../shared/constants/tableColumns'
+import { layerLabel, OLT_CUSTOMER_LAYER_TITLE } from "../../../shared/constants/layerLabels";
+import { selectableLayerEntries } from "../state/selectableLayers";
 
 const MAX_AREA_SQKM = 10; 
 
 // This widget's id in the shared draw lock (state/mapDrawLock.js).
 const SELECTION_TOOL_ID = "selection";
+
+// Every table tab this widget owns starts with this, so it can find and drop
+// its own tabs without touching anyone else's -- there is one per layer now.
+const SELECTION_TAB_PREFIX = "selection:";
+
+// The layers whose rows the shared customer column set describes. Anything
+// else gets the table's auto-generated columns, which is the right answer for
+// a cable or a cabinet.
+const CUSTOMER_COLUMN_LAYERS = new Set(["Customers_test", OLT_CUSTOMER_LAYER_TITLE]);
 
 // Shown next to the result count so the user can see which shape produced it.
 const SHAPE_LABELS = {
@@ -46,7 +64,7 @@ const SHAPE_LABELS = {
 
 export default function SelectionWidget() {
   // --- CHANGED: Now pulling tableData, addTableData, removeTableData ---
-  const { view, layers, tableData, addTableData, removeTableData } = useArcGIS();
+  const { view, layers, isLayerSelectable, tableData, addTableData, removeTableData } = useArcGIS();
   
   const [bufferDistance, setBufferDistance] = useState(0);
   const [bufferInput, setBufferInput] = useState("0");
@@ -64,7 +82,11 @@ export default function SelectionWidget() {
   const sketchLayer = useRef(null);
   const bufferLayer = useRef(null);
   const apiHighlightLayer = useRef(null);
-  const highlightHandle = useRef(null); 
+  // One handle per layer that returned something -- highlights are per layer
+  // view, so a multi-layer result needs a handle each.
+  const highlightHandles = useRef([]);
+  // The tab ids the last run created, so clearing removes exactly those.
+  const selectionTabIds = useRef([]);
   const currentGeometry = useRef(null);
   const debounceTimer = useRef(null);
   const isSelfUpdate = useRef(false);
@@ -73,30 +95,37 @@ export default function SelectionWidget() {
   const bufferDistanceRef = useRef(bufferDistance);
   const selectionModeRef = useRef(selectionMode);
   const executeRef = useRef();
+  // Read inside the async run, which outlives the render that started it.
+  const isLayerSelectableRef = useRef(isLayerSelectable);
 
   useEffect(() => {
     bufferDistanceRef.current = bufferDistance;
     selectionModeRef.current = selectionMode;
-  }, [bufferDistance, selectionMode]);
+    isLayerSelectableRef.current = isLayerSelectable;
+  }, [bufferDistance, selectionMode, isLayerSelectable]);
 
   useEffect(() => {
     executeRef.current = executeSelection;
   }); 
 
-  // --- CHANGED: Listen to the "selection" tab to detect external clears ---
-  const selectionFeatures = tableData?.selection?.features;
+  // Someone closed our tabs from the table -- drop the sketch with them, so
+  // the map isn't left showing a shape whose results have gone. Joined into a
+  // string because the set of ids is what matters, not the array's identity.
+  const openSelectionTabs = Object.keys(tableData || {})
+    .filter((id) => id.startsWith(SELECTION_TAB_PREFIX))
+    .sort()
+    .join("|");
   useEffect(() => {
     if (isSelfUpdate.current) {
         isSelfUpdate.current = false;
         return; 
     }
     const hasGraphics = sketchLayer.current && sketchLayer.current.graphics.length > 0;
-    const isExternalClear = !selectionFeatures || selectionFeatures.length === 0;
 
-    if (isExternalClear && hasGraphics) {
+    if (openSelectionTabs === "" && hasGraphics) {
         clearSelectionUI();
     }
-  }, [selectionFeatures]); 
+  }, [openSelectionTabs]); 
 
   useEffect(() => {
     if (!view || !view.map || !layers) return;
@@ -156,7 +185,7 @@ export default function SelectionWidget() {
         view.map.remove(bufferLayer.current);
         view.map.remove(apiHighlightLayer.current);
       }
-      if (highlightHandle.current) highlightHandle.current.remove();
+      clearHighlights();
     };
   }, [view, layers]); 
 
@@ -195,9 +224,38 @@ export default function SelectionWidget() {
     return { type: "simple-fill", color: [0, 255, 255, 0.4], outline: { color: [0, 255, 255, 1], width: 2 } };
   };
 
+  /** Drops every layer-view highlight the last run put on the map. */
+  const clearHighlights = () => {
+    highlightHandles.current.forEach((handle) => handle?.remove());
+    highlightHandles.current = [];
+  };
+
+  /** Removes the tabs the last run opened, leaving everyone else's alone. */
+  const clearSelectionTabs = () => {
+    if (!removeTableData || selectionTabIds.current.length === 0) return;
+    isSelfUpdate.current = true;
+    selectionTabIds.current.forEach((id) => removeTableData(id));
+    selectionTabIds.current = [];
+  };
+
+  // Visible, marked "Include in selection", and able to answer a spatial query
+  // -- the rule itself lives in state/selectableLayers.js, where it is testable
+  // and where the layer list reads the same defaults from.
+  const selectionTargets = () => selectableLayerEntries(layers, isLayerSelectableRef.current);
+
   const executeSelection = async (geometry, dist) => {
     const currentMode = selectionModeRef.current;
-    if (currentMode === "layer" && (!layers || !layers.Customers_test)) return;
+    const targets = currentMode === "layer" ? selectionTargets() : [];
+
+    if (currentMode === "layer" && targets.length === 0) {
+      clearHighlights();
+      clearSelectionTabs();
+      setResultInfo(null);
+      setErrorMessage(
+        "No layer is available to select from. Switch a layer on and turn on \"Include in selection\" for it in the layer list."
+      );
+      return;
+    }
 
     setErrorMessage(""); 
     const safeDist = dist !== undefined ? dist : bufferDistance;
@@ -205,7 +263,7 @@ export default function SelectionWidget() {
     
     if (bufferLayer.current) bufferLayer.current.removeAll();
     if (apiHighlightLayer.current) apiHighlightLayer.current.removeAll();
-    if (highlightHandle.current) highlightHandle.current.remove();
+    clearHighlights();
 
     const canBuffer = geometry.type === "point" || geometry.type === "polyline";
 
@@ -224,21 +282,44 @@ export default function SelectionWidget() {
 
     try {
       let finalFeatures = [];
+      // [{ title, features }] for the layer mode -- one entry per layer that
+      // caught something, which is one tab each.
+      let perLayer = [];
 
       if (currentMode === "layer") {
-        const query = layers.Customers_test.createQuery();
-        query.geometry = searchGeometry;
-        query.spatialRelationship = "intersects";
-        query.returnGeometry = true;
-        query.outFields = ["*"];
+        const hits = await Promise.all(
+          targets.map(async ([title, layer]) => {
+            const query = layer.createQuery();
+            query.geometry = searchGeometry;
+            query.spatialRelationship = "intersects";
+            query.returnGeometry = true;
+            query.outFields = ["*"];
 
-        const results = await layers.Customers_test.queryFeatures(query);
-        finalFeatures = results.features;
+            try {
+              const results = await layer.queryFeatures(query);
+              return { title, layer, features: results.features };
+            } catch (err) {
+              // One layer refusing a spatial query (an odd geometry type, a
+              // server hiccup) must not lose the layers that did answer.
+              console.error(`Selection query failed on ${title}:`, err);
+              return { title, layer, features: [] };
+            }
+          })
+        );
 
-        if (finalFeatures.length > 0) {
-           const layerView = await view.whenLayerView(layers.Customers_test);
-           highlightHandle.current = layerView.highlight(finalFeatures);
-        }
+        perLayer = hits.filter((hit) => hit.features.length > 0);
+        finalFeatures = perLayer.flatMap((hit) => hit.features);
+
+        await Promise.all(
+          perLayer.map(async ({ layer, features }) => {
+            try {
+              const layerView = await view.whenLayerView(layer);
+              highlightHandles.current.push(layerView.highlight(features));
+            } catch (err) {
+              console.error("Could not highlight selection:", err);
+            }
+          })
+        );
 
       } else if (currentMode === "api") {
         const extent = searchGeometry.extent;
@@ -318,29 +399,47 @@ export default function SelectionWidget() {
 
           finalFeatures = parsedGraphics.filter(g => geometryEngine.intersects(searchGeometry, g.geometry));
           apiHighlightLayer.current.addMany(finalFeatures);
+          // The server fetch is customers and only customers, so it is one
+          // tab like it always was.
+          perLayer = finalFeatures.length > 0
+            ? [{ title: "Customers_test", features: finalFeatures }]
+            : [];
         }
       }
 
-      // --- CHANGED: Push to the Table Dictionary ---
+      // The tabs from the previous run go before the new ones land: a shape
+      // dragged off a layer's features must not leave that layer's tab behind
+      // claiming they are still selected.
+      clearSelectionTabs();
+
       // Only open the table when the selection actually hit something.
       // addTableData() forces isVisible: true, so pushing an empty result
       // set here opened the bottom panel on an empty tab.
       if (finalFeatures.length > 0) {
-        setResultInfo({ count: finalFeatures.length, shape: SHAPE_LABELS[activeShape.current] || "Shape" });
+        setResultInfo({
+          count: finalFeatures.length,
+          shape: SHAPE_LABELS[activeShape.current] || "Shape",
+          layers: perLayer.map(({ title, features }) => ({ label: layerLabel(title), count: features.length })),
+        });
+
         if (addTableData) {
           isSelfUpdate.current = true;
-          addTableData("selection", "Spatial Selection", finalFeatures, customerColumns);
+          selectionTabIds.current = perLayer.map(({ title, features }) => {
+            const tabId = `${SELECTION_TAB_PREFIX}${title}`;
+            addTableData(
+              tabId,
+              `Selection · ${layerLabel(title)}`,
+              features,
+              // Auto-generated columns are the right answer for everything the
+              // customer column set does not describe.
+              CUSTOMER_COLUMN_LAYERS.has(title) ? customerColumns : undefined
+            );
+            return tabId;
+          });
         }
       } else {
         setResultInfo(null);
-        // Drop a tab left over from a previous selection, but only if one
-        // exists -- flagging a self-update with nothing to update would
-        // swallow the next genuine external clear.
-        if (removeTableData && tableData?.selection) {
-          isSelfUpdate.current = true;
-          removeTableData("selection");
-        }
-        setErrorMessage("No customers found in the selected area.");
+        setErrorMessage("Nothing found in the selected area.");
       }
 
     } catch (error) {
@@ -383,7 +482,7 @@ export default function SelectionWidget() {
     if (sketchLayer.current) sketchLayer.current.removeAll();
     if (bufferLayer.current) bufferLayer.current.removeAll();
     if (apiHighlightLayer.current) apiHighlightLayer.current.removeAll();
-    if (highlightHandle.current) highlightHandle.current.remove();
+    clearHighlights();
     
     currentGeometry.current = null;
     setGeometryType(null);
@@ -400,11 +499,7 @@ export default function SelectionWidget() {
     setActiveTool(null);
     activeShape.current = null;
     clearSelectionUI();
-    // --- CHANGED: Remove only the "selection" tab ---
-    if (removeTableData) {
-        isSelfUpdate.current = true; 
-        removeTableData("selection");
-    }
+    clearSelectionTabs();
   };
 
   const isBufferEnabled = hasGeometry && (geometryType === "point" || geometryType === "polyline");
@@ -412,8 +507,10 @@ export default function SelectionWidget() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       <div style={{ fontSize: "0.78rem", color: "#9aa0a6", lineHeight: 1.4 }}>
-        Draws a shape and returns the customers inside it. For lengths and
-        areas, use <strong>Measure Tools</strong>.
+        Draws a shape and returns what is inside it, from every visible layer
+        marked <strong>Include in selection</strong> in the layer list
+        (customers, unless you say otherwise). For lengths and areas, use{" "}
+        <strong>Measure Tools</strong>.
       </div>
 
       <CalciteLabel>
@@ -423,8 +520,8 @@ export default function SelectionWidget() {
           onChange={(e) => setSelectionMode(e.target.value)}
           style={{ width: "100%", padding: "8px", marginTop: "6px", backgroundColor: "#2b2b2b", color: "#dedede", border: "1px solid var(--calcite-ui-border-3)", borderRadius: "0px" }}
         >
-          <option value="layer" style={{ color: "#dedede", backgroundColor: "#2b2b2b" }}>Current View</option>
-          <option value="api" style={{ color: "#dedede", backgroundColor: "#2b2b2b" }}>All Customers</option>
+          <option value="layer" style={{ color: "#dedede", backgroundColor: "#2b2b2b" }}>Layers on the map</option>
+          <option value="api" style={{ color: "#dedede", backgroundColor: "#2b2b2b" }}>All customers (server)</option>
         </select>
       </CalciteLabel>
 
@@ -445,8 +542,21 @@ export default function SelectionWidget() {
 
       {hasGeometry && resultInfo && (
         <div style={{ padding: "8px 12px", backgroundColor: "rgba(0, 255, 255, 0.08)", borderLeft: "3px solid rgba(0, 255, 255, 0.8)", borderRadius: "4px", fontSize: "0.85rem" }}>
-          <strong>{resultInfo.count.toLocaleString()}</strong> customer{resultInfo.count === 1 ? "" : "s"} selected
+          <strong>{resultInfo.count.toLocaleString()}</strong> feature{resultInfo.count === 1 ? "" : "s"} selected
           <span style={{ color: "#9aa0a6" }}> &middot; {resultInfo.shape}</span>
+
+          {/* Which layer each one came from -- with several layers in play, a
+              single total says nothing about what you actually caught. */}
+          {resultInfo.layers?.length > 0 && (
+            <div style={{ marginTop: "4px", fontSize: "0.75rem", color: "#9aa0a6" }}>
+              {resultInfo.layers.map(({ label, count }) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                  <span>{count.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

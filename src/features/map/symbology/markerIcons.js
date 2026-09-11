@@ -16,9 +16,9 @@
 import zero from "../../../assets/images/zero.png";
 import one from "../../../assets/images/one.png";
 import two from "../../../assets/images/two.png";
-import twoLong from "../../../assets/images/two_1.png";
+import twoLong from "../../../assets/images/two_1.PNG";
 import three from "../../../assets/images/three.png";
-import four from "../../../assets/images/four.png";
+import four from "../../../assets/images/four.PNG";
 
 // Network assets.
 import pop from "../../../assets/images/POP.png";

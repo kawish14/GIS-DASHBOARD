@@ -222,6 +222,28 @@ calcite-shell-panel[display-mode="overlay"] {
   isolation: isolate;
 }
 
+/* Alarm rows that expand to a second level rather than only highlighting the
+   map -- currently the two Low Optical Power rows, which open their
+   `lopdetail` cause breakdown (features/sidebars/left/LopCauseStats.jsx).
+   RegionStats renders the chevron next to the count, and turns it down while
+   the row is open; this is the rest of the affordance. */
+calcite-list-item.fault-drilldown {
+  cursor: pointer;
+}
+
+/* The chevron sits in the light DOM (slot="content-end"), so it can be styled
+   from here -- calcite-list-item's own label cannot. Nudging it and lifting
+   its colour on hover is what makes the row read as a link. */
+calcite-list-item.fault-drilldown [slot="content-end"] calcite-icon {
+  --calcite-ui-icon-color: var(--calcite-ui-text-2);
+  transition: transform 0.15s ease-in-out;
+}
+
+calcite-list-item.fault-drilldown:hover [slot="content-end"] calcite-icon {
+  --calcite-ui-icon-color: var(--calcite-ui-text-0);
+  transform: translateX(3px);
+}
+
 /* An overlay panel covers the map edge the ArcGIS UI corners are anchored to,
    so slide those corners inward while it's open. MapView.jsx sets the two
    inset variables. Transform only -- moving the widgets must not touch the
