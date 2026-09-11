@@ -226,10 +226,16 @@ even with the layer switched off.
 **Filtering →** a widget queries, sets a `definitionExpression` or layer-view
 filter, pushes rows into `FeatureTableDataContext`, and publishes a summary to
 `ActiveFiltersContext`. The table appears; the filter bar appears over the map.
-`OltCustomerFilter`'s "all customers" scope registers its own layer
-(`Customers_test_WFS`), so it behaves like any other layer: it appears in the
-layer list, its points open `CustomerDetails`, and the selection tool can
-return them.
+`OltCustomerFilter` asks one question two ways — customers **by OLT**
+(`olt = '<id>'`) or **by POP service area** (a spatial match against the
+`pop_boundary` polygons, "POP Service Areas" in the layer list) — because a
+customer record carries no POP of its own, only a position. Its "all
+customers" scope registers its own layer (`Customers_test_WFS`, labelled
+"Filtered Customers"), so the result behaves like any other layer: it appears
+in the layer list, its points open `CustomerDetails`, and the selection tool
+can return them. For a service area that layer is built from a bounding-box
+read narrowed to the real polygon in the browser — a CQL `INTERSECTS` would
+have to carry a few thousand vertices through a URL.
 
 **The table →** `FeatureTable` renders a tab per visible entry. Clicking a tab
 frames that tab's features; clicking a row zooms to and marks that one. Only

@@ -36,7 +36,7 @@ import {
 } from "@esri/calcite-components-react";
 import { api } from "../../../shared/config/runtimeConfig";
 import { customerColumns } from '../../../shared/constants/tableColumns'
-import { layerLabel, OLT_CUSTOMER_LAYER_TITLE } from "../../../shared/constants/layerLabels";
+import { layerLabel, FILTERED_CUSTOMER_LAYER_TITLE } from "../../../shared/constants/layerLabels";
 import { selectableLayerEntries } from "../state/selectableLayers";
 
 const MAX_AREA_SQKM = 10; 
@@ -51,7 +51,7 @@ const SELECTION_TAB_PREFIX = "selection:";
 // The layers whose rows the shared customer column set describes. Anything
 // else gets the table's auto-generated columns, which is the right answer for
 // a cable or a cabinet.
-const CUSTOMER_COLUMN_LAYERS = new Set(["Customers_test", OLT_CUSTOMER_LAYER_TITLE]);
+const CUSTOMER_COLUMN_LAYERS = new Set(["Customers_test", FILTERED_CUSTOMER_LAYER_TITLE]);
 
 // Shown next to the result count so the user can see which shape produced it.
 const SHAPE_LABELS = {
