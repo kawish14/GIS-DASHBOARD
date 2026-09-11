@@ -25,31 +25,19 @@ import {
  *
  * One request covers both LOP rows: it asks for `alarmstate = 4` and splits
  * warning from minor here, using the same comparison TopBar.jsx counts with,
- * so the panel's total always matches the chip on the row that opened it.
- * Nothing is fetched until a row is actually clicked -- the sidebar stays a
- * summary until the user asks for more.
+ * so a breakdown's total always matches the chip on the row above it. Nothing
+ * is fetched until a row is expanded -- the sidebar stays a summary until the
+ * user asks for the split.
  *
  * @param {string} region     region tab to load, e.g. "South"
  * @param {object} options
- * @param {boolean} options.enabled  false parks the hook (panel closed)
+ * @param {boolean} options.enabled  false parks the hook (row collapsed)
  */
 
-// Only what the panel renders. Geometry is deliberately absent: locating a
-// customer re-queries the map layer for the real graphic (see
-// LopDetailPanel.jsx), which is what the selection stack and `goTo` want.
-const BREAKDOWN_FIELDS = [
-  "id",
-  "name",
-  "city",
-  "region",
-  "area_town",
-  "sub_area",
-  "olt",
-  "alarminfo",
-  "fault_time",
-  "perceived_severity",
-  LOP_DETAIL_FIELD,
-];
+// Two fields, because two fields are all a count needs: which bucket the row
+// belongs to, and which cause it counts towards. No geometry, no identity --
+// the rows are tallied and dropped.
+const BREAKDOWN_FIELDS = ["perceived_severity", LOP_DETAIL_FIELD];
 
 // A hard ceiling on one region's LOP population. Well above any real count,
 // low enough that a runaway alarm storm can't hand the browser a 100k-row
@@ -71,7 +59,7 @@ function buildBreakdownUrl(region) {
   return `${api}/geoserver/web_app/ows?${params.toString()}`;
 }
 
-const IDLE = Object.freeze({ status: "idle", records: [], error: null, loadedAt: null, truncated: false });
+const IDLE = Object.freeze({ status: "idle", records: [], error: null, truncated: false });
 
 export default function useLopBreakdown(region, { enabled = true } = {}) {
   const [fetched, setFetched] = useState(IDLE);
@@ -108,13 +96,12 @@ export default function useLopBreakdown(region, { enabled = true } = {}) {
           status: "ready",
           records,
           error: null,
-          loadedAt: new Date(),
           truncated: records.length >= MAX_FEATURES,
         });
       } catch (err) {
         if (err.name === "AbortError" || !isMounted) return;
         console.error("LOP breakdown fetch failed:", err);
-        setFetched({ status: "error", records: [], error: err.message, loadedAt: null, truncated: false });
+        setFetched({ status: "error", records: [], error: err.message, truncated: false });
       }
     };
 
@@ -131,9 +118,8 @@ export default function useLopBreakdown(region, { enabled = true } = {}) {
     setReloadToken((token) => token + 1);
   }, []);
 
-  // Both variants are summarised up front: the panel can switch between the
-  // two LOP rows without another round trip, and the work is one pass over a
-  // list that is already in memory.
+  // Both variants are summarised up front: expanding the other LOP row costs
+  // no round trip, and the work is one pass over a list already in memory.
   const byVariant = useMemo(() => {
     const warning = [];
     const minor = [];

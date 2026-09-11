@@ -142,7 +142,7 @@ export default function OntStatusFeed() {
             // Same keep-what-we-have rule as the fields around it: the alert
             // payload carries lopdetail only for LOP alarms, and dropping it
             // on every other update would empty the cause breakdown the
-            // sidebar drills into (features/sidebars/left/LopDetailPanel.jsx).
+            // sidebar counts (features/sidebars/left/LopCauseStats.jsx).
             updatedGraphic.attributes.lopdetail = alert.lopdetail ? alert.lopdetail : updatedGraphic.attributes.lopdetail;
             updatedGraphic.attributes.lastDownCause = alert.lastDownCause ? alert.lastDownCause : updatedGraphic.attributes.lastDownCause;
             updatedGraphic.attributes.lastdowntime = alert.lastdowntime ? alert.lastdowntime : updatedGraphic.attributes.lastdowntime;

@@ -222,11 +222,11 @@ calcite-shell-panel[display-mode="overlay"] {
   isolation: isolate;
 }
 
-/* Alarm rows that are a link into a second window rather than just a map
-   highlight -- currently the two Low Optical Power rows, which open their
-   `lopdetail` cause breakdown (features/sidebars/left/LopDetailPanel.jsx).
-   RegionStats renders the chevron next to the count; this is the rest of the
-   affordance. */
+/* Alarm rows that expand to a second level rather than only highlighting the
+   map -- currently the two Low Optical Power rows, which open their
+   `lopdetail` cause breakdown (features/sidebars/left/LopCauseStats.jsx).
+   RegionStats renders the chevron next to the count, and turns it down while
+   the row is open; this is the rest of the affordance. */
 calcite-list-item.fault-drilldown {
   cursor: pointer;
 }

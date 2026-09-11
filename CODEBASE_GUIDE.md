@@ -203,22 +203,17 @@ renders **nothing at all** — that is why a cold start shows no left panel.
 `SelectionContext`; `RightSidebar` opens Details and renders the matching panel
 from `sidebars/right/details/`. Those panels can `pushSelection` to drill in.
 
-**Clicking a Low Optical Power row →** the row is a link, not just a map
-highlight. It selects the fault (so `RegionStats` blooms those points) and
-navigates the sidebar forward to `sidebars/left/LopDetailPanel.jsx`, which
-breaks the same alarm down by its `lopdetail` cause. The two are steps of a
-`calcite-flow`: the region tabs are its first item, the breakdown its second,
-and calcite draws the back arrow. Which step is showing is React's to say --
-the flow only auto-selects when no item claims to be selected -- so
-`LeftSidebar` marks the tabs item `selected` exactly while nothing is drilled
-into. Selecting a cause lists its customers and hands their ids back to
-`RegionStats`, which narrows the highlight to them; `RegionStats` stays the
-only writer of `featureEffect`. `LeftSidebar` owns which row is open, because
-there is one `RegionStats` per region tab and all of them are mounted at once.
-Locating a customer from the list re-queries the customer layer for the real
-graphic and pushes it onto the selection stack, so the right sidebar opens on
-it -- the map is never covered, which is the point of keeping this in the
-panel instead of a window over the map.
+**Clicking a Low Optical Power row →** as well as the map highlight every
+fault row applies, the row expands to its `lopdetail` cause breakdown
+(`sidebars/left/LopCauseStats.jsx`), rendered between the list's own rows so
+it stays attached to the row that opened it. Counts and shares only: no
+customer list, and nothing that navigates the panel away from the alarm
+summary. `useLopBreakdown` reads the region's LOP alarms from GeoServer the
+first time a row is expanded — two fields, `perceived_severity` and
+`lopdetail` — and splits warning from minor with the same comparison `TopBar`
+counts with, so a breakdown's total always matches the chip above it. Which
+row is open is `RegionStats`' own state: there is one per region tab, each
+keeping its own.
 
 **Filtering →** a widget queries, sets a `definitionExpression` or layer-view
 filter, pushes rows into `FeatureTableDataContext`, and publishes a summary to
@@ -237,8 +232,8 @@ The components that take props at all:
 | Component | Props | Why |
 | --- | --- | --- |
 | `LeftSidebar`, `RightSidebar` | `hidden` | driven by `activeView` (see §8) |
-| `RegionStats` | `region`, `selectedFault`, `setSelectedFault`, `onOpenLopDetails`, `lopCauseIds` | the parent's own tab state, plus the LOP drill-in the parent owns |
-| `LopDetailPanel` | `region`, `variant`, `onClose`, `onCauseSelect` | which alarm row opened it |
+| `RegionStats` | `region`, `selectedFault`, `setSelectedFault` | the parent's own tab state |
+| `LopCauseStats` | `region`, `variant` | which alarm row expanded it |
 | `sidebars/right/details/*` | `feature` | the entry being rendered |
 | `SymbologyLayer` | `layerKey`, `defaultVisible` | which layer it configures |
 | `FeatureGuard` | `featureKey`, `children`, `fallback` | what it gates |
@@ -258,9 +253,9 @@ The components that take props at all:
 | `features/map/symbology/symbologyPalettes.js` | the colour schemes, with the validation results that justify them |
 | `features/map/symbology/markerIcons.js` | the picture markers the widget can assign, curated so only these bundle |
 | `features/map/widgets/outageAnalysis/diagnose.js` | groups alarms by OLT/PON and decides what broke; pure, no ArcGIS |
-| `features/sidebars/left/useLopBreakdown.js` | one region's LOP customers, read from GeoServer on demand and grouped by `lopdetail`; feeds the drill-in window |
+| `features/sidebars/left/useLopBreakdown.js` | one region's LOP alarms, read from GeoServer the first time a row is expanded and counted by `lopdetail` |
 | `shared/constants/faultCodes.js` | alarm-state codes; use these, never the raw numbers |
-| `shared/constants/lopDetail.js` | the `lopdetail` field: parsing the cause tag, the warning/minor split, and the grouping the breakdown renders |
+| `shared/constants/lopDetail.js` | the `lopdetail` field: parsing the cause tag, the warning/minor split, and the counting the breakdown renders |
 | `shared/constants/tableColumns.js` | column definitions for the attribute table |
 
 ---

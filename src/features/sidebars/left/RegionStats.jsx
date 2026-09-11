@@ -11,13 +11,9 @@ import {
 import { useLayers } from "../../map/state/LayersContext";
 import { useMapView } from "../../map/state/MapViewContext";
 import { useStats } from "../../map/state/AlarmStatsContext";
-import {
-  FAULT_CODES,
-  DERIVED_FAULT_CODES,
-  STALE_FAULT_WINDOW_DAYS,
-  escapeForCql,
-} from "../../../shared/constants/faultCodes";
+import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS } from "../../../shared/constants/faultCodes";
 import { LOP_VARIANTS } from "../../../shared/constants/lopDetail";
+import LopCauseStats from "./LopCauseStats";
 
 /**
  * One region's alarm breakdown, rendered per region tab by LeftSidebar.jsx.
@@ -26,17 +22,13 @@ import { LOP_VARIANTS } from "../../../shared/constants/lopDetail";
  * the parent's own tab state; the counts are read straight from AlarmStatsContext
  * rather than handed down, since every tab wants the same numbers.
  *
- * The two Low Optical Power rows are summary-level on purpose: the cause
- * breakdown behind them lives in the `lopdetail` field and is a step of its
- * own in the sidebar's flow (LopDetailPanel.jsx), which the parent navigates
- * to through `onOpenLopDetails`. When a cause is selected there the parent
- * hands the matching customer ids back as `lopCauseIds`, and the map highlight
- * below narrows to them -- this component stays the only writer of
- * `featureEffect`.
+ * The two Low Optical Power rows carry a second level: the `lopdetail` field
+ * says which cause each of those alarms was raised for, and expanding a row
+ * shows that split (LopCauseStats.jsx) underneath it. It stays a count of
+ * counts -- no customer list, no navigation, nothing that moves the panel off
+ * the alarm summary the user came here for.
  */
-export default function RegionStats({
-  region, selectedFault, setSelectedFault, onOpenLopDetails, lopCauseIds
-}) {
+export default function RegionStats({ region, selectedFault, setSelectedFault }) {
   const { alertCount, realtimeStats } = useStats();
   const { customerLayerView } = useLayers();
   const { view } = useMapView();
@@ -45,14 +37,19 @@ export default function RegionStats({
     setSelectedFault(prev => prev === faultType ? null : faultType);
   };
 
+  // Which LOP row has its cause breakdown showing, if any. Local because it
+  // is this tab's view state: each region tab keeps its own, and none of them
+  // outlives the tab the way a shared panel would.
+  const [expandedLop, setExpandedLop] = useState(null);
+
   /**
-   * A LOP row is a link into its breakdown, not a toggle: it always selects
-   * the fault (so the map highlights it) and always navigates in. Coming back
-   * is what clears both -- see LeftSidebar.jsx.
+   * A LOP row toggles two things with one click: the map highlight every fault
+   * row applies, and the cause breakdown underneath it. Clicking the row again
+   * puts both back.
    */
   const handleLopClick = (variantKey) => {
-    setSelectedFault(variantKey);
-    onOpenLopDetails?.(variantKey);
+    handleFaultClick(variantKey);
+    setExpandedLop((current) => (current === variantKey ? null : variantKey));
   };
 
   useEffect(() => {
@@ -92,23 +89,13 @@ export default function RegionStats({
         whereClause = "1=1";
     }
 
-    // A cause picked inside the LOP breakdown narrows the same highlight
-    // rather than starting a competing one. Filtering on `id` rather than on
-    // `lopdetail` is deliberate: the field is absent from the layer's schema
-    // whenever the batch it inferred from carried no LOP rows, and a where
-    // clause naming a field that isn't there throws.
-    if (lopCauseIds?.length) {
-      const idList = lopCauseIds.map((id) => `'${escapeForCql(id)}'`).join(",");
-      whereClause = `(${whereClause}) AND id IN (${idList})`;
-    }
-
     customerLayerView.featureEffect = {
       filter: { where: whereClause },
       includedEffect: "bloom(0.9, 0.6pt, 1) ",
       excludedEffect: "blur(2px) opacity(0.3) "
     };
 
-  }, [selectedFault, customerLayerView, lopCauseIds]);
+  }, [selectedFault, customerLayerView]);
 
   // 1. Data Extraction
   const onlineCount = alertCount?.[region]?.Online || 0;
@@ -124,6 +111,17 @@ export default function RegionStats({
     powerOff: realtimeStats?.[region]?.[FAULT_CODES.POWER_OFF] || 0,
     gpl: realtimeStats?.[region]?.[FAULT_CODES.GPL] || 0,
   }
+
+  // The two LOP rows, paired with their counts, so the markup below renders
+  // them the same way instead of twice over.
+  const lopRows = [
+    { variant: LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_MINOR], count: CriticalFaultData.lopMinor },
+    { variant: LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_WARNING], count: CriticalFaultData.lopWarning },
+  ].filter((row) => row.count > 0);
+
+  // An expanded row whose count has since dropped to zero is no longer on
+  // screen, and its breakdown must not outlive it.
+  const expandedLopRow = lopRows.find((row) => row.variant.key === expandedLop);
 
   const totalCriticalFaults = Object.values(CriticalFaultData).reduce((a, b) => a + b, 0);
   const totalOtherFaults = Object.values(OtherFaultData).reduce((a, b) => a + b, 0);
@@ -232,43 +230,35 @@ export default function RegionStats({
               </CalciteListItem>
             )}
 
-            {/* Both LOP rows open the cause breakdown. The chevron beside the
-                count is the affordance; `fault-drilldown` (index.css) is the
-                rest of it -- pointer cursor, and the chevron sliding and
-                brightening on hover. */}
-            {CriticalFaultData.lopMinor > 0 && (
-              <CalciteListItem
-                className={`fault-drilldown ${getHighlightStyle(DERIVED_FAULT_CODES.LOP_MINOR, { stayClickable: true })}`}
-                onClick={() => handleLopClick(DERIVED_FAULT_CODES.LOP_MINOR)}
-                label={LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_MINOR].label}
-                description={LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_MINOR].description}
-                title="Open the LOP cause breakdown"
-              >
-                <div slot="content-end" className="flex items-center gap-1">
-                  <CalciteChip scale="s" style={{"--calcite-chip-background-color": LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_MINOR].color, "--calcite-chip-text-color": "black"}}>
-                    {CriticalFaultData.lopMinor}
-                  </CalciteChip>
-                  <CalciteIcon icon="chevron-right" scale="s" />
-                </div>
-              </CalciteListItem>
-            )}
+            {/* Both LOP rows expand to their cause breakdown. The chevron
+                beside the count is the affordance -- it turns down when the
+                row is open; `fault-drilldown` (index.css) is the rest of it,
+                pointer cursor and a nudge on hover. */}
+            {lopRows.map(({ variant, count }) => (
+              <React.Fragment key={variant.key}>
+                <CalciteListItem
+                  className={`fault-drilldown ${getHighlightStyle(variant.key, { stayClickable: true })}`}
+                  onClick={() => handleLopClick(variant.key)}
+                  label={variant.label}
+                  description={variant.description}
+                  title={expandedLop === variant.key ? "Hide the cause breakdown" : "Show the cause breakdown"}
+                >
+                  <div slot="content-end" className="flex items-center gap-1">
+                    <CalciteChip scale="s" style={{"--calcite-chip-background-color": variant.color, "--calcite-chip-text-color": "black"}}>
+                      {count}
+                    </CalciteChip>
+                    <CalciteIcon icon={expandedLop === variant.key ? "chevron-down" : "chevron-right"} scale="s" />
+                  </div>
+                </CalciteListItem>
 
-            {CriticalFaultData.lopWarning > 0 && (
-              <CalciteListItem
-                className={`fault-drilldown ${getHighlightStyle(DERIVED_FAULT_CODES.LOP_WARNING, { stayClickable: true })}`}
-                onClick={() => handleLopClick(DERIVED_FAULT_CODES.LOP_WARNING)}
-                label={LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_WARNING].label}
-                description={LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_WARNING].description}
-                title="Open the LOP cause breakdown"
-              >
-                <div slot="content-end" className="flex items-center gap-1">
-                  <CalciteChip scale="s" style={{"--calcite-chip-background-color": LOP_VARIANTS[DERIVED_FAULT_CODES.LOP_WARNING].color, "--calcite-chip-text-color": "black"}}>
-                    {CriticalFaultData.lopWarning}
-                  </CalciteChip>
-                  <CalciteIcon icon="chevron-right" scale="s" />
-                </div>
-              </CalciteListItem>
-            )}
+                {/* The breakdown sits between the list's own rows, so it stays
+                    attached to the row that opened it rather than falling to
+                    the bottom of the list. */}
+                {expandedLopRow?.variant.key === variant.key && (
+                  <LopCauseStats region={region} variant={variant.key} />
+                )}
+              </React.Fragment>
+            ))}
           </CalciteList>
         )}
       </CalciteBlock>

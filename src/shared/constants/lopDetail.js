@@ -25,7 +25,7 @@
  * missing one lands in a single explicit "Unclassified" bucket rather than
  * silently vanishing from a count the sidebar has already published.
  */
-import { FAULT_CODES, DERIVED_FAULT_CODES, SEVERITY } from "./faultCodes";
+import { DERIVED_FAULT_CODES, SEVERITY } from "./faultCodes";
 
 /** The attribute name, in one place -- it goes into WFS propertyName lists and CQL. */
 export const LOP_DETAIL_FIELD = "lopdetail";
@@ -84,14 +84,6 @@ export function isWarningSeverity(severity) {
   return String(severity ?? "").toLowerCase() === SEVERITY.WARNING;
 }
 
-/** True for a record the LOP rows are counting: alarmstate 4, right severity bucket. */
-export function matchesLopVariant(record, variantKey) {
-  const variant = LOP_VARIANTS[variantKey];
-  if (!variant) return false;
-  if (Number(record?.alarmstate) !== FAULT_CODES.LOP) return false;
-  return isWarningSeverity(record?.perceived_severity) === variant.isWarning;
-}
-
 /**
  * Pulls the cause out of a raw tag.
  *
@@ -117,13 +109,13 @@ export function parseLopDetail(raw) {
 }
 
 /**
- * Groups LOP records into the cause list the drill-in renders.
+ * Counts LOP records by cause -- the numbers the sidebar shows under a row.
  *
- * Causes come back biggest-first because that is the order an operator wants
- * to work them in; the "Unclassified" bucket is forced last regardless of its
- * size, since it is a gap in the data rather than a cause anyone can act on.
- * `customers` rides along with each cause: the panel needs the ids both to
- * list them and to highlight exactly those points on the map.
+ * Counts and shares only: the records themselves are not kept, because the
+ * breakdown is a summary and the customers behind it belong to the map and the
+ * attribute table. Causes come back biggest-first, the order an operator wants
+ * to work them in, except "Unclassified", which is forced last however big it
+ * gets -- it is a gap in the data rather than a cause anyone can act on.
  */
 export function summariseLopDetail(records = []) {
   const buckets = new Map();
@@ -131,11 +123,11 @@ export function summariseLopDetail(records = []) {
   records.forEach((record) => {
     const { code, label, raw } = parseLopDetail(record?.[LOP_DETAIL_FIELD]);
     if (!buckets.has(code)) {
-      buckets.set(code, { code, label, samples: new Set(), customers: [] });
+      buckets.set(code, { code, label, samples: new Set(), count: 0 });
     }
     const bucket = buckets.get(code);
     if (raw) bucket.samples.add(raw);
-    bucket.customers.push(record);
+    bucket.count += 1;
   });
 
   const total = records.length;
@@ -145,9 +137,8 @@ export function summariseLopDetail(records = []) {
       label: bucket.label,
       // Every distinct raw tag that landed here, for the row's tooltip.
       samples: [...bucket.samples],
-      count: bucket.customers.length,
-      share: total ? bucket.customers.length / total : 0,
-      customers: bucket.customers,
+      count: bucket.count,
+      share: total ? bucket.count / total : 0,
     }))
     .sort((a, b) => {
       const aUnclassified = a.code === UNCLASSIFIED_LOP_CAUSE;
