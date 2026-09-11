@@ -7,11 +7,10 @@ import useLopBreakdown from "./useLopBreakdown";
  * One Low Optical Power row's `lopdetail` breakdown: how its count splits
  * across the causes behind it.
  *
- * Rendered inline by RegionStats.jsx, directly under the Critical Faults list
- * and only while its row is expanded. Not a window and not a flow step -- the
- * sidebar stays where it is and nothing covers the map, because this is a
- * second line of numbers about a count that is already on screen, not a place
- * to navigate to.
+ * RegionStats.jsx brings this to the front of the panel when a row is clicked,
+ * over its own blurred content -- not a dropdown under the row, and not a view
+ * you navigate to. The sidebar never moves and the map is never covered; the
+ * numbers simply come forward and go away again.
  *
  * Counts only, deliberately. The customers behind each cause are what the map
  * and the attribute table are for; repeating them here would turn a summary
@@ -24,7 +23,7 @@ function formatShare(share) {
   return percent < 0.1 ? "<0.1%" : `${percent.toFixed(1)}%`;
 }
 
-export default function LopCauseStats({ region, variant }) {
+export default function LopCauseStats({ region, variant, onClose }) {
   const { status, error, byVariant, truncated, refresh } = useLopBreakdown(region, { enabled: true });
 
   const meta = LOP_VARIANTS[variant];
@@ -35,18 +34,27 @@ export default function LopCauseStats({ region, variant }) {
   return (
     <div
       style={{
-        // Inset and accented in the row's own colour, so the block reads as
-        // belonging to the row above it rather than as a new section.
-        margin: "0 0.5rem 0.5rem 1rem",
-        borderInlineStart: `3px solid ${meta.color}`,
-        background: "var(--calcite-ui-foreground-2)",
-        borderRadius: "0 4px 4px 0",
+        // A card, not a section: solid ground of its own, the row's colour
+        // along the top, and a shadow, so it reads as being in front of the
+        // panel rather than part of the list behind it.
+        background: "var(--calcite-ui-foreground-1)",
+        border: "1px solid var(--calcite-ui-border-3, #2d3748)",
+        borderTop: `3px solid ${meta.color}`,
+        borderRadius: "4px",
+        boxShadow: "0 12px 28px rgba(0, 0, 0, 0.55)",
+        maxHeight: "60vh",
+        overflowY: "auto",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", padding: "0.4rem 0.5rem 0.3rem 0.6rem" }}>
-        <span style={{ flex: 1, fontSize: "0.6rem", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--calcite-ui-text-2)" }}>
-          {status === "ready" ? `By cause · ${summary.total.toLocaleString()} total` : "By cause"}
-        </span>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.2rem", padding: "0.4rem 0.35rem 0.3rem 0.6rem" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--calcite-ui-text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {meta.label}
+          </div>
+          <div style={{ fontSize: "0.58rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--calcite-ui-text-2)" }}>
+            {status === "ready" ? `By cause · ${summary.total.toLocaleString()} total` : "By cause"}
+          </div>
+        </div>
         <CalciteAction
           scale="s"
           appearance="transparent"
@@ -55,6 +63,14 @@ export default function LopCauseStats({ region, variant }) {
           title="Re-read lopdetail from GeoServer"
           disabled={status === "loading" ? true : undefined}
           onClick={refresh}
+        />
+        <CalciteAction
+          scale="s"
+          appearance="transparent"
+          icon="x"
+          text="Close"
+          title="Close the breakdown"
+          onClick={onClose}
         />
       </div>
 

@@ -12,7 +12,7 @@ import { useLayers } from "../../map/state/LayersContext";
 import { useMapView } from "../../map/state/MapViewContext";
 import { useStats } from "../../map/state/AlarmStatsContext";
 import { FAULT_CODES, DERIVED_FAULT_CODES, STALE_FAULT_WINDOW_DAYS } from "../../../shared/constants/faultCodes";
-import { LOP_VARIANTS } from "../../../shared/constants/lopDetail";
+import { LOP_VARIANTS, isLopVariant } from "../../../shared/constants/lopDetail";
 import LopCauseStats from "./LopCauseStats";
 
 /**
@@ -43,13 +43,18 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
   const [expandedLop, setExpandedLop] = useState(null);
 
   /**
-   * A LOP row toggles two things with one click: the map highlight every fault
-   * row applies, and the cause breakdown underneath it. Clicking the row again
-   * puts both back.
+   * A LOP row does two things with one click: the map highlight every fault
+   * row applies, and brings its cause breakdown to the front of the panel.
    */
   const handleLopClick = (variantKey) => {
     handleFaultClick(variantKey);
     setExpandedLop((current) => (current === variantKey ? null : variantKey));
+  };
+
+  /** Dismissing the breakdown also releases the map highlight it came with. */
+  const closeLopStats = () => {
+    setExpandedLop(null);
+    setSelectedFault((current) => (isLopVariant(current) ? null : current));
   };
 
   useEffect(() => {
@@ -173,8 +178,14 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
     return () => clearTimeout(timer);
   }, [totalCriticalFaults, region]);
 
+  const isLopOpen = Boolean(expandedLopRow);
+
   return (
-    <div className="flex flex-col h-full bg-[var(--calcite-ui-foreground-1)]">
+    <div className="relative flex flex-col h-full bg-[var(--calcite-ui-foreground-1)]">
+      {/* Everything the panel normally shows. While a LOP breakdown is up it
+          steps back -- dimmed and blurred, the same language the fault rows
+          already use for "not the thing you are looking at". */}
+      <div className={`flex flex-col h-full transition-all duration-300 ${isLopOpen ? "opacity-40 blur-[2px] grayscale-[0.4] pointer-events-none" : ""}`}>
       {/* SECTION B: OPERATIONAL STATUS */}
       <CalciteBlock scale="s" heading="Operational Status" open collapsible>
         <CalciteIcon slot="icon" icon="check-circle" style={{'--calcite-ui-icon-color': 'rgba(0, 255, 94, 0.95)'}} />
@@ -230,34 +241,26 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
               </CalciteListItem>
             )}
 
-            {/* Both LOP rows expand to their cause breakdown. The chevron
-                beside the count is the affordance -- it turns down when the
-                row is open; `fault-drilldown` (index.css) is the rest of it,
-                pointer cursor and a nudge on hover. */}
+            {/* Both LOP rows bring their cause breakdown to the front rather
+                than unfolding under themselves -- see the overlay below. The
+                chevron is the affordance; `fault-drilldown` (index.css) is the
+                rest of it, pointer cursor and a nudge on hover. */}
             {lopRows.map(({ variant, count }) => (
-              <React.Fragment key={variant.key}>
-                <CalciteListItem
-                  className={`fault-drilldown ${getHighlightStyle(variant.key, { stayClickable: true })}`}
-                  onClick={() => handleLopClick(variant.key)}
-                  label={variant.label}
-                  description={variant.description}
-                  title={expandedLop === variant.key ? "Hide the cause breakdown" : "Show the cause breakdown"}
-                >
-                  <div slot="content-end" className="flex items-center gap-1">
-                    <CalciteChip scale="s" style={{"--calcite-chip-background-color": variant.color, "--calcite-chip-text-color": "black"}}>
-                      {count}
-                    </CalciteChip>
-                    <CalciteIcon icon={expandedLop === variant.key ? "chevron-down" : "chevron-right"} scale="s" />
-                  </div>
-                </CalciteListItem>
-
-                {/* The breakdown sits between the list's own rows, so it stays
-                    attached to the row that opened it rather than falling to
-                    the bottom of the list. */}
-                {expandedLopRow?.variant.key === variant.key && (
-                  <LopCauseStats region={region} variant={variant.key} />
-                )}
-              </React.Fragment>
+              <CalciteListItem
+                key={variant.key}
+                className={`fault-drilldown ${getHighlightStyle(variant.key, { stayClickable: true })}`}
+                onClick={() => handleLopClick(variant.key)}
+                label={variant.label}
+                description={variant.description}
+                title="Show the cause breakdown"
+              >
+                <div slot="content-end" className="flex items-center gap-1">
+                  <CalciteChip scale="s" style={{"--calcite-chip-background-color": variant.color, "--calcite-chip-text-color": "black"}}>
+                    {count}
+                  </CalciteChip>
+                  <CalciteIcon icon="chevron-right" scale="s" />
+                </div>
+              </CalciteListItem>
             ))}
           </CalciteList>
         )}
@@ -312,6 +315,26 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
         )}
 
       </CalciteBlock>
+      </div>
+
+      {/* The breakdown itself, in front of the blurred panel. Clicking the
+          backdrop puts it away, as does the block's own close button. */}
+      {isLopOpen && (
+        <>
+          <div
+            role="presentation"
+            onClick={closeLopStats}
+            className="absolute inset-0 z-10"
+          />
+          <div className="absolute inset-x-2 top-3 z-20">
+            <LopCauseStats
+              region={region}
+              variant={expandedLopRow.variant.key}
+              onClose={closeLopStats}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

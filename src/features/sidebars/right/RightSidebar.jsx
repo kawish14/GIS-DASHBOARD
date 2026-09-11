@@ -34,6 +34,7 @@ import LonghaulDetails from "./details/LonghaulDetails";
 import ParcelDetails from "./details/ParcelDetails";
 import CoordinateDetails from './details/CoordinateDetails';
 import CoincidentFeaturePager from './CoincidentFeaturePager';
+import { layerLabel, OLT_CUSTOMER_LAYER_TITLE } from '../../../shared/constants/layerLabels';
 import FspOutageAnalyzer from '../../map/widgets/FspOutageAnalyzer';
 import InactiveCustomerFilter from '../../filters/widgets/InactiveCustomerFilter';
 import DensityMapToggle from '../../map/widgets/DensityMapToggle';
@@ -270,6 +271,11 @@ export default function RightSidebar({ hidden = false }) {
       const title = popupFeature.layer?.title;
       switch (title) {
         case "Customers_inactive": return <InactiveCustomerDetails feature={popupFeature} />;
+        // The OLT filter's "all customers" layer is the customer layer under
+        // another title, so a point on it opens the same panel. Without this
+        // it fell through to "No renderer found", which is what clicking a
+        // filtered customer used to do.
+        case OLT_CUSTOMER_LAYER_TITLE:
         case "Customers_test": return <CustomerDetails feature={popupFeature} />;
         case "pop": return <PopDetails feature={popupFeature} />;
         case "dc_odb": return <DcDetails feature={popupFeature} />;
@@ -380,7 +386,7 @@ export default function RightSidebar({ hidden = false }) {
                           color: isActive ? "#fff" : "var(--calcite-ui-text-1)",
                         }}
                       >
-                        <span>[{idx + 1}] {entry.label === "Customers_test" ? "Customers" : entry.label}{idLabel ? `: ${idLabel}` : ""}</span>
+                        <span>[{idx + 1}] {layerLabel(entry.label)}{idLabel ? `: ${idLabel}` : ""}</span>
                         <CalciteAction scale="m" icon="x" appearance="transparent" onClick={(e) => { e.stopPropagation(); closeSelection(entry.id); }} />
                       </div>
                     );

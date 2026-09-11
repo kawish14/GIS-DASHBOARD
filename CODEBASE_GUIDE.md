@@ -204,10 +204,10 @@ renders **nothing at all** — that is why a cold start shows no left panel.
 from `sidebars/right/details/`. Those panels can `pushSelection` to drill in.
 
 **Clicking a Low Optical Power row →** as well as the map highlight every
-fault row applies, the row expands to its `lopdetail` cause breakdown
-(`sidebars/left/LopCauseStats.jsx`), rendered between the list's own rows so
-it stays attached to the row that opened it. Counts and shares only: no
-customer list, and nothing that navigates the panel away from the alarm
+fault row applies, the row brings its `lopdetail` cause breakdown
+(`sidebars/left/LopCauseStats.jsx`) to the front of the panel: the card sits
+over the alarm list, which blurs and dims behind it. Counts and shares only:
+no customer list, and nothing that navigates the panel away from the alarm
 summary. `useLopBreakdown` reads the region's LOP alarms from GeoServer the
 first time a row is expanded — two fields, `perceived_severity` and
 `lopdetail` — and splits warning from minor with the same comparison `TopBar`
@@ -220,9 +220,11 @@ filter, pushes rows into `FeatureTableDataContext`, and publishes a summary to
 `ActiveFiltersContext`. The table appears; the filter bar appears over the map.
 
 **The table →** `FeatureTable` renders a tab per visible entry. Clicking a tab
-frames and outlines that tab's features; clicking a row zooms to and highlights
-one. Tab outlines live on their own `GraphicsLayer` so a row click — which
-clears `view.graphics` — doesn't wipe them.
+frames that tab's features; clicking a row zooms to and marks that one. Only
+the row you click is marked: a tab used to outline every one of its features,
+which on a filter returning thousands of customers covered the map in rings —
+and, past its own cap, only some of them, so the map looked arbitrarily
+half-marked.
 
 ### Props
 

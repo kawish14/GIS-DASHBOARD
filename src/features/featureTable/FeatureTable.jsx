@@ -6,10 +6,12 @@
  * drill-in from this table). It owns only view state: which tab is active,
  * the page, and the selected row.
  *
- * Two map side effects live here. Clicking a tab frames and outlines that
- * tab's features, and clicking a row zooms to and highlights that one feature.
- * The tab outlines go on their own GraphicsLayer so a row click, which clears
- * view.graphics, doesn't wipe them.
+ * One map side effect lives here: clicking a row zooms to that feature and
+ * marks it. Nothing else on the map is touched -- a tab used to outline every
+ * one of its features as well, which on a filter returning thousands of
+ * customers painted rings over most of the map (and, past its own cap, over
+ * only some of them, so the map looked arbitrarily half-marked). A tab frames
+ * its rows; only the row you click is marked.
  */
 import React, { useState, useEffect, useMemo , useRef} from "react";
 import { useArcGIS } from "../map/state/MapProvider";
@@ -17,45 +19,6 @@ import { CalciteButton } from "@esri/calcite-components-react";
 import { api, authenticate } from "../../shared/config/runtimeConfig";
 import { analyticsColumns, customerColumns } from "../../shared/constants/tableColumns";
 import Graphic from "@arcgis/core/Graphic";
-import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
-
-// The active tab's features are outlined on their own GraphicsLayer rather
-// than in `view.graphics`, which mapLocate() wipes on every row click -- a tab
-// highlight has to survive the user picking rows out of that same tab.
-const TAB_HIGHLIGHT_LAYER_TITLE = "Table_Tab_Highlight";
-
-// Outlining tens of thousands of features costs more than it tells anyone, and
-// a tab that big is a zoomed-way-out extent where individual rings are a
-// smear. Past this the tab is framed but not outlined.
-const MAX_TAB_HIGHLIGHTS = 2000;
-
-const TAB_HIGHLIGHT_COLOR = [0, 255, 255];
-
-// Same cyan the row highlight uses, one step quieter, so a picked row still
-// reads as the selected one inside its highlighted tab.
-function tabHighlightSymbol(geometry) {
-  const [r, g, b] = TAB_HIGHLIGHT_COLOR;
-
-  switch (geometry?.type) {
-    case "polygon":
-    case "extent":
-      return {
-        type: "simple-fill",
-        color: [r, g, b, 0.08],
-        outline: { color: [r, g, b, 0.9], width: 1.5 },
-      };
-    case "polyline":
-      return { type: "simple-line", color: [r, g, b, 0.9], width: 2 };
-    default:
-      return {
-        type: "simple-marker",
-        style: "circle",
-        color: [r, g, b, 0.15],
-        size: "14px",
-        outline: { color: [r, g, b, 0.9], width: 1.5 },
-      };
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Helper: automatically generate column definitions from feature attributes
@@ -121,7 +84,6 @@ export default function FeatureTable() {
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [selectedRowId, setSelectedRowId] = useState(null);
   const tabRefs = useRef({});
-  const tabHighlightLayerRef = useRef(null);
 
   // 1. Manage Active Tabs dynamically
   const availableTabs = Object.keys(tableData || {}).filter(key => tableData[key].isVisible);
@@ -164,65 +126,6 @@ export default function FeatureTable() {
     setLocalFeatures(features);
     setCurrentPage(1);
   }, [features]);
-
-  // ...and outlines them, so the rows are identifiable once you get there.
-  // Framing an extent on its own only tells you roughly where to look; which
-  // of the features already on screen belong to this tab is the part the user
-  // actually came for.
-  //
-  // Keyed on the active tab's features rather than on the tab click, so every
-  // way of changing tabs lands here -- opening one, closing one and falling
-  // back to its neighbour, or a Refresh replacing the rows underneath.
-  useEffect(() => {
-    if (!view) return undefined;
-
-    let layer = tabHighlightLayerRef.current;
-    if (!layer || layer.destroyed) {
-      layer = new GraphicsLayer({
-        title: TAB_HIGHLIGHT_LAYER_TITLE,
-        listMode: "hide",
-        legendEnabled: false,
-      });
-      tabHighlightLayerRef.current = layer;
-    }
-    if (!view.map.layers.includes(layer)) view.map.add(layer);
-
-    // Keep it above the operational layers it is outlining.
-    const index = view.map.layers.indexOf(layer);
-    if (index > -1 && index !== view.map.layers.length - 1) {
-      view.map.reorder(layer, view.map.layers.length - 1);
-    }
-
-    layer.removeAll();
-
-    const targets = features.filter((f) => f?.geometry).slice(0, MAX_TAB_HIGHLIGHTS);
-    layer.addMany(
-      targets.map(
-        (feature) =>
-          new Graphic({
-            geometry: feature.geometry,
-            symbol: tabHighlightSymbol(feature.geometry),
-          })
-      )
-    );
-
-    return () => {
-      if (!layer.destroyed) layer.removeAll();
-    };
-  }, [view, features]);
-
-  // Take the layer off the map when the table goes away, so a closed table
-  // leaves nothing outlined behind it.
-  useEffect(() => {
-    return () => {
-      const layer = tabHighlightLayerRef.current;
-      tabHighlightLayerRef.current = null;
-      if (!layer || layer.destroyed) return;
-      layer.removeAll();
-      view?.map?.remove(layer);
-      layer.destroy();
-    };
-  }, [view]);
 
   if (availableTabs.length === 0) return null;
 

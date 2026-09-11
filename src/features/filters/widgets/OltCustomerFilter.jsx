@@ -15,6 +15,7 @@ import { usePublishFilter } from "../ActiveFiltersContext";
 import { useAuth } from "../../auth/AuthContext";
 import { Realtime } from '../../../shared/config/runtimeConfig'; 
 import { customerColumns } from '../../../shared/constants/tableColumns';
+import { OLT_CUSTOMER_LAYER_TITLE } from '../../../shared/constants/layerLabels';
 
 export default function OltCustomerFilter() {
   const { view, customerLayerView, addTableData, removeTableData, tableData, setTableVisibility } = useArcGIS(); 
@@ -49,7 +50,7 @@ export default function OltCustomerFilter() {
 
   const removeWFSLayer = () => {
     if (view && view.map) {
-      const existingLayer = view.map.layers.find(layer => layer.title === "Customers_test_WFS");
+      const existingLayer = view.map.layers.find(layer => layer.title === OLT_CUSTOMER_LAYER_TITLE);
       if (existingLayer) view.map.remove(existingLayer);
     }
   };
@@ -82,7 +83,10 @@ export default function OltCustomerFilter() {
         const wfsUrl = `http://gis.tes.com.pk:29881/geoserver/web_app/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=web_app%3ACustomers_test&outputFormat=application%2Fjson&maxFeatures=1000000&cql_filter=${encodeURIComponent(cqlFilter)}`;
 
         const wfsLayer = new GeoJSONLayer({
-          url: wfsUrl, title: "Customers_test_WFS",
+          url: wfsUrl, title: OLT_CUSTOMER_LAYER_TITLE,
+          // Same as the customer layer it stands in for: clicks go to the
+          // right sidebar's CustomerDetails, not to an ArcGIS popup.
+          popupEnabled: false,
           renderer: { type: "simple", symbol: { type: "simple-marker", color: "#ff8c00", size: "6px", outline: { color: "#ffffff", width: 1 } } }
         });
         view.map.add(wfsLayer);
