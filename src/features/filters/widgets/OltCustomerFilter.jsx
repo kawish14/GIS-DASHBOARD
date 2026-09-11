@@ -18,7 +18,7 @@ import { customerColumns } from '../../../shared/constants/tableColumns';
 import { OLT_CUSTOMER_LAYER_TITLE } from '../../../shared/constants/layerLabels';
 
 export default function OltCustomerFilter() {
-  const { view, customerLayerView, addTableData, removeTableData, tableData, setTableVisibility } = useArcGIS(); 
+  const { view, customerLayerView, addTableData, removeTableData, tableData, setTableVisibility, registerLayer, unregisterLayer } = useArcGIS(); 
   const { user } = useAuth(); 
   const REGIONS = user?.permissions?.regions || [];
 
@@ -48,10 +48,14 @@ export default function OltCustomerFilter() {
     fetchOLTs();
   }, []); 
 
+  // Unregister rather than just remove: the layer is in the shared registry
+  // (so it shows up in the layer list and the selection tool), and a registry
+  // entry pointing at a layer that is no longer on the map is worse than none.
   const removeWFSLayer = () => {
+    unregisterLayer(OLT_CUSTOMER_LAYER_TITLE);
     if (view && view.map) {
-      const existingLayer = view.map.layers.find(layer => layer.title === OLT_CUSTOMER_LAYER_TITLE);
-      if (existingLayer) view.map.remove(existingLayer);
+      const stray = view.map.layers.find(layer => layer.title === OLT_CUSTOMER_LAYER_TITLE);
+      if (stray) view.map.remove(stray);
     }
   };
 
@@ -90,6 +94,10 @@ export default function OltCustomerFilter() {
           renderer: { type: "simple", symbol: { type: "simple-marker", color: "#ff8c00", size: "6px", outline: { color: "#ffffff", width: 1 } } }
         });
         view.map.add(wfsLayer);
+        // Registering it makes it a layer like any other: it appears in the
+        // layer list with its own visibility, and the selection tool can
+        // return its customers.
+        registerLayer(OLT_CUSTOMER_LAYER_TITLE, wfsLayer);
         await view.whenLayerView(wfsLayer);
         const query = wfsLayer.createQuery(); query.where = "1=1"; query.outFields = ["*"]; query.returnGeometry = true;
         const featureSet = await wfsLayer.queryFeatures(query);

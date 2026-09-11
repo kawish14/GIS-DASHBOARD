@@ -128,7 +128,7 @@ holds. Every one is headed by a comment naming its writers and readers.
 | File | Hook | Holds | Written by | Read by |
 | --- | --- | --- | --- | --- |
 | `MapViewContext.jsx` | `useMapView` | the ArcGIS `MapView` + `Map` | `map/MapCanvas.jsx` only | nearly everything map-touching |
-| `LayersContext.jsx` | `useLayers` | operational layers by id, `customerLayerView` | `map/layers/styles/*`, `useCustomerLayerLoading` | filter widgets, layer list, `RegionStats` |
+| `LayersContext.jsx` | `useLayers` | operational layers by id, `customerLayerView`, which layers the selection tool may draw from | `map/layers/styles/*`, `useCustomerLayerLoading`, the layer list | filter widgets, layer list, `RegionStats`, `SelectionWidget` |
 | `AlarmStatsContext.jsx` | `useStats` | per-region alarm counts | `realtime/OntStatusFeed.jsx`, `dashboard/TopBar.jsx` | `sidebars/left/*` |
 | `SelectionContext.jsx` | `useSelection` | the selection **stack** + parcel + highlight handle | `map/interactions/GlobalClickHandler.jsx`, detail panels | `sidebars/right/RightSidebar.jsx` |
 | `FeatureTableDataContext.jsx` | `useFeatureTableData` | the attribute table's tabs | filter widgets, `SelectionWidget`, `FeatureTable` | `FeatureTable`, `DashboardPage` |
@@ -215,9 +215,21 @@ counts with, so a breakdown's total always matches the chip above it. Which
 row is open is `RegionStats`' own state: there is one per region tab, each
 keeping its own.
 
+**Selecting →** `SelectionWidget` draws a shape and queries **every layer that
+is visible and marked "Include in selection"** in the layer list — the rule is
+`map/state/selectableLayers.js`, the switch is on each layer's row, and only
+the customer layers are on by default. Each layer that hits gets its own table
+tab (`selection:<layer title>`). Visibility is part of the rule on purpose: the
+tool used to query the customer layer by name, so customers came back selected
+even with the layer switched off.
+
 **Filtering →** a widget queries, sets a `definitionExpression` or layer-view
 filter, pushes rows into `FeatureTableDataContext`, and publishes a summary to
 `ActiveFiltersContext`. The table appears; the filter bar appears over the map.
+`OltCustomerFilter`'s "all customers" scope registers its own layer
+(`Customers_test_WFS`), so it behaves like any other layer: it appears in the
+layer list, its points open `CustomerDetails`, and the selection tool can
+return them.
 
 **The table →** `FeatureTable` renders a tab per visible entry. Clicking a tab
 frames that tab's features; clicking a row zooms to and marks that one. Only
@@ -256,6 +268,7 @@ The components that take props at all:
 | `features/map/symbology/markerIcons.js` | the picture markers the widget can assign, curated so only these bundle |
 | `features/map/widgets/outageAnalysis/diagnose.js` | groups alarms by OLT/PON and decides what broke; pure, no ArcGIS |
 | `features/sidebars/left/useLopBreakdown.js` | one region's LOP alarms, read from GeoServer the first time a row is expanded and counted by `lopdetail` |
+| `features/map/state/selectableLayers.js` | which layers a selection draws from — the defaults, and the visible/selectable/queryable rule both the layer list and the selection widget use; pure, no ArcGIS |
 | `shared/constants/faultCodes.js` | alarm-state codes; use these, never the raw numbers |
 | `shared/constants/lopDetail.js` | the `lopdetail` field: parsing the cause tag, the warning/minor split, and the counting the breakdown renders |
 | `shared/constants/tableColumns.js` | column definitions for the attribute table |

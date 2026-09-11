@@ -20,7 +20,7 @@ export const LAYER_LABELS = {
   fat: "Fiber Access Terminal (FAT)",
   Backhaul: "Backhaul Routes",
   Customers_test: "Customers",
-  [OLT_CUSTOMER_LAYER_TITLE]: "Customers",
+  [OLT_CUSTOMER_LAYER_TITLE]: "OLT Customers",
   Customers_inactive: "Inactive Customers",
   Distribution: "Distribution OFC",
   Feeder: "Feeder OFC",
