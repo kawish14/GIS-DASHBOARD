@@ -36,7 +36,7 @@ import {
 } from "@esri/calcite-components-react";
 import { api } from "../../../shared/config/runtimeConfig";
 import { customerColumns } from '../../../shared/constants/tableColumns'
-import { layerLabel, OLT_CUSTOMER_LAYER_TITLE } from "../../../shared/constants/layerLabels";
+import { layerLabel, FILTERED_CUSTOMER_LAYER_TITLE } from "../../../shared/constants/layerLabels";
 import { selectableLayerEntries } from "../state/selectableLayers";
 
 const MAX_AREA_SQKM = 10; 
@@ -51,7 +51,7 @@ const SELECTION_TAB_PREFIX = "selection:";
 // The layers whose rows the shared customer column set describes. Anything
 // else gets the table's auto-generated columns, which is the right answer for
 // a cable or a cabinet.
-const CUSTOMER_COLUMN_LAYERS = new Set(["Customers_test", OLT_CUSTOMER_LAYER_TITLE]);
+const CUSTOMER_COLUMN_LAYERS = new Set(["Customers_test", FILTERED_CUSTOMER_LAYER_TITLE]);
 
 // Shown next to the result count so the user can see which shape produced it.
 const SHAPE_LABELS = {
@@ -508,8 +508,7 @@ export default function SelectionWidget() {
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       <div style={{ fontSize: "0.78rem", color: "#9aa0a6", lineHeight: 1.4 }}>
         Draws a shape and returns what is inside it, from every visible layer
-        marked <strong>Include in selection</strong> in the layer list
-        (customers, unless you say otherwise). For lengths and areas, use{" "}
+        marked <strong>Include in selection</strong> in the layer widget. For lengths and areas, use{" "}
         <strong>Measure Tools</strong>.
       </div>
 

@@ -6,7 +6,7 @@
  * widget reads the resulting list, and both should be arguing with the same
  * function rather than each other.
  */
-import { OLT_CUSTOMER_LAYER_TITLE } from "../../../shared/constants/layerLabels";
+import { FILTERED_CUSTOMER_LAYER_TITLE } from "../../../shared/constants/layerLabels";
 
 /**
  * On by default. Customers are what an operator means by "select" nearly every
@@ -17,7 +17,7 @@ import { OLT_CUSTOMER_LAYER_TITLE } from "../../../shared/constants/layerLabels"
  */
 export const DEFAULT_SELECTABLE_LAYERS = Object.freeze([
   "Customers_test",
-  OLT_CUSTOMER_LAYER_TITLE,
+  FILTERED_CUSTOMER_LAYER_TITLE,
 ]);
 
 const DEFAULTS = new Set(DEFAULT_SELECTABLE_LAYERS);
