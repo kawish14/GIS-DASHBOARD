@@ -86,7 +86,8 @@ export default function GlobalClickHandler() {
             r.graphic.attributes &&
             r.layer.title !== "zones" &&
             r.layer.title !== "pop_boundary" &&
-            r.layer.title !== "Home Parcels"
+            r.layer.title !== "Home Parcels" &&
+            r.layer.title !== "conduit"
         );
 
         //  CASE 1: NORMAL FEATURE(S) FOUND
@@ -225,10 +226,12 @@ export default function GlobalClickHandler() {
     if (!view) return;
 
     selectionStack.forEach(async (entry) => {
+      console.log(`Processing selection entry: ${entry.id}, candidateIndex: ${entry.candidateIndex}`);
       if (entry.highlightHandle) return;
 
       const layer = entry.feature?.layer;
-      if (!layer || layer.title === "zones" || layer.title === "pop_boundary") return;
+      console.log(`Highlighting feature from layer: ${layer?.title}`);
+      if (!layer || layer.title === "zones" || layer.title === "pop_boundary" || layer.title === "conduit") return;
 
       try {
         let targetLayerView = storedLayerViews[layer.title];

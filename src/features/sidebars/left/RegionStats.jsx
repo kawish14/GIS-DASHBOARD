@@ -249,7 +249,8 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
               <CalciteListItem
                 key={variant.key}
                 className={`fault-drilldown ${getHighlightStyle(variant.key, { stayClickable: true })}`}
-                onClick={() => handleLopClick(variant.key)}
+                //onClick={() => handleLopClick(variant.key)}
+                onClick={() => handleFaultClick(variant.key)}
                 label={variant.label}
                 description={variant.description}
                 title="Show the cause breakdown"
@@ -258,7 +259,7 @@ export default function RegionStats({ region, selectedFault, setSelectedFault })
                   <CalciteChip scale="s" style={{"--calcite-chip-background-color": variant.color, "--calcite-chip-text-color": "black"}}>
                     {count}
                   </CalciteChip>
-                  <CalciteIcon icon="chevron-right" scale="s" />
+                  {/* <CalciteIcon icon="chevron-right" scale="s" /> */}
                 </div>
               </CalciteListItem>
             ))}

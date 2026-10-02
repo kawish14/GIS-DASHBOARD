@@ -27,7 +27,7 @@ const COLORS = {
 const fieldsToDisplay = [
   { key: "id", label: "ID" },
   // { key: "name", label: "Name" },
-  { key: "pop_id", label: "POP", isLink: true },
+  { key: "pop_id", label: "POP", isLink: false },
   { key: "type", label: "Type" },
   { key: "placement", label: "Placement" },
   { key: "area", label: "Area" },

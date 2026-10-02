@@ -122,7 +122,7 @@ const fieldsToDisplay = [
   { key: "slot", label: "Slot", group: "Active Infrastructure" },
   { key: "port", label: "Port", group: "Active Infrastructure" },
   { key: "ontid", label: "ONT", group: "Active Infrastructure" },
-  { key: "dc_id", label: "DC / ODB", group: "Passive Elements", isLink: true },
+  { key: "dc_id", label: "DC / ODB", group: "Passive Elements", isLink: false },
   { key: "alarminfo", label: "Current Alarm", group: "Diagnostics" },
   { key: "lastdowncause", label: "Last Down Cause", group: "Diagnostics" },
   { key: "lastdowntime", label: "Down Time", group: "Diagnostics" },

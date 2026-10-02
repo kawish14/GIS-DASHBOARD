@@ -1,4 +1,4 @@
-import SymbologyLayer from "../../symbology/SymbologyLayer";
+import SymbologyLayer from "../symbology/SymbologyLayer";
 
 /**
  * BEFORE: this file hardcoded the fiber_type field and its color mapping

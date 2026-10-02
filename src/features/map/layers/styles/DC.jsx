@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useArcGIS } from "../../state/MapProvider";
-import SymbologyLayer from "../../symbology/SymbologyLayer";
+import SymbologyLayer from "../symbology/SymbologyLayer";
 
 export default function DC() {
   const { layers, view } = useArcGIS();

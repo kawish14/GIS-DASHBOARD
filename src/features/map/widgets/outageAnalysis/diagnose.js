@@ -1,23 +1,3 @@
-/**
- * Root-cause analysis for clustered customer outages.
- *
- * Pure functions -- no ArcGIS, no React. The widget queries the customer layer
- * and hands plain attribute rows in here; everything below is arithmetic on
- * those rows, which is what makes the rules reviewable and the thresholds
- * tunable in one place.
- *
- * The question this answers is not "how many customers are down on this PON"
- * (a count anyone can get from the table) but "what broke". Those are
- * different, and the distinction is the whole point: 23 customers down on a
- * port is a fibre cut if they all went dark at once with loss of signal, an
- * area power cut if they report power-off, and a splitter or connector problem
- * if they are merely degraded. Same count, three different crews.
- *
- * Every verdict carries the evidence it was reached from, because these are
- * heuristics over telemetry, not a certainty -- see `CAUSES` for what each one
- * claims and `THRESHOLDS` for where the lines are drawn.
- */
-
 import { FAULT_CODES } from "../../../../shared/constants/faultCodes";
 
 export const CAUSES = Object.freeze({

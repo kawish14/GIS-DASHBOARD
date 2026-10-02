@@ -27,6 +27,8 @@ export const LAYER_LABELS = {
   dc_odb: "Distribution Cabinets (DC/ODB)",
   pop: "POP",
   jc: "Joint Closure (JC)",
+  hh: "Handhole (HH)",
+  conduit: "Conduit",
   pop_boundary: "POP Service Areas",
   zones: "Zones",
   site: "TWA Site",

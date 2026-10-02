@@ -16,7 +16,6 @@ import { useRightPanel } from "../../map/state/RightPanelContext";
 import { useSelection } from "../../map/state/SelectionContext";
 import { useSidebarLayout, usePanelRef } from "../../dashboard/SidebarLayoutContext";
 import LayerList from '../../map/widgets/layerList/LayerList';
-import SymbologyWidget from '../../map/symbology/SymbologyWidget';
 import BaseMapPicker from '../../map/widgets/BaseMapPicker';
 import SelectionWidget from '../../map/widgets/SelectionWidget';
 import MeasurementWidget from '../../map/widgets/MeasurementWidget';
@@ -420,13 +419,6 @@ export default function RightSidebar({ hidden = false }) {
             <CalciteBlock scale="m" heading="Layer Content" collapsible open>
               <LayerList />
             </CalciteBlock>
-          </div>
-        </FeatureGuard>
-
-        {/* --- SYMBOLOGY TAB --- */}
-        <FeatureGuard featureKey="tab_Symbology">
-          <div style={{ display: activeTool === "Symbology" ? "block" : "none" }}>
-            <SymbologyWidget />
           </div>
         </FeatureGuard>
 

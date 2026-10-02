@@ -31,6 +31,7 @@ import JC from "./styles/JC";
 import Distribution from "./styles/Distribution";
 import TwaSites from "./styles/TwaSites";
 import Longhaul from "./styles/Longhaul";
+import Conduit from "./styles/Conduit";
 
 esriConfig.request.timeout = 300000; // 5 min — GeoServer WFS requests can be slow for large regions
 
@@ -255,6 +256,7 @@ export default function Layers() {
       <Distribution />
       <TwaSites />
       <Longhaul />
+      <Conduit />
     </div>
   );
 }
