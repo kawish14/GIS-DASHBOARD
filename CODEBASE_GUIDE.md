@@ -271,10 +271,7 @@ The components that take props at all:
 | `features/auth/usePermittedRegions.js` | the user's regions, sorted, shared between the two left-sidebar tabs |
 | `features/auth/featureRegistry.js` | scans `src/**` at build time for exported `featureMeta` and builds the admin panel's toggle grid — so a gated tool declares its own key next to itself and no central list needs editing |
 | `features/filters/ActiveFiltersContext.jsx` | `usePublishFilter` — how a filter widget announces itself |
-| `features/map/symbology/buildRenderer.js` | turns a symbology config into an ArcGIS renderer — used by both the server-driven `SymbologyLayer` and the interactive `SymbologyWidget` |
-| `features/map/symbology/classify.js` | natural breaks / equal interval / quantile, and distinct values; pure, no ArcGIS |
-| `features/map/symbology/symbologyPalettes.js` | the colour schemes, with the validation results that justify them |
-| `features/map/symbology/markerIcons.js` | the picture markers the widget can assign, curated so only these bundle |
+| `features/map/layers/symbology/buildRenderer.js` | turns a symbology config into an ArcGIS renderer for `SymbologyLayer` |
 | `features/map/widgets/outageAnalysis/diagnose.js` | groups alarms by OLT/PON and decides what broke; pure, no ArcGIS |
 | `features/sidebars/left/useLopBreakdown.js` | one region's LOP alarms, read from GeoServer the first time a row is expanded and counted by `lopdetail` |
 | `features/filters/serviceAreas.js` | one picker entry per POP service area rather than per polygon, and the region grouping both of the OLT/POP filter's pickers use; pure |
@@ -290,15 +287,13 @@ The components that take props at all:
 | I want to… | Go to |
 | --- | --- |
 | add or restyle a map layer | `features/map/layers/styles/`, then render it in `layers/Layers.jsx` |
+| change a layer's standing symbology | `symbology-config.json` on the Realtime server |
 | change what a map click does | `features/map/interactions/GlobalClickHandler.jsx` |
 | tune the outage root-cause rules | `features/map/widgets/outageAnalysis/diagnose.js` — `THRESHOLDS` and `diagnosePort` |
 | add a map widget (zoom-like control) | `features/map/widgets/`, mount it in `map/MapCanvas.jsx` |
 | change the popup for a feature type | `features/sidebars/right/details/` |
 | add a right-sidebar tab | `ACTIONS` in `sidebars/right/RightSidebar.jsx` + a `featureMeta` key |
 | add or change a filter | `features/filters/widgets/`; publish via `usePublishFilter` |
-| change how a layer is drawn, by hand | Symbology tab — `features/map/symbology/SymbologyWidget.jsx` |
-| add a picture marker to the symbology picker | `features/map/symbology/markerIcons.js` |
-| add a colour scheme or classification method | `symbologyPalettes.js` / `classify.js` in `features/map/symbology/` |
 | change the attribute table | `features/featureTable/FeatureTable.jsx`; columns in `shared/constants/tableColumns.js` |
 | change panel docking / overlay behaviour | `features/dashboard/SidebarLayoutContext.jsx` |
 | change the page frame or table resize | `features/dashboard/DashboardPage.jsx` |
@@ -311,46 +306,15 @@ The components that take props at all:
 
 ---
 
-## 8. Symbology: two paths to a renderer
+## 8. Symbology
 
-A layer can get its renderer from either of two places, and it helps to know
-which one you are looking at.
+Each module in `layers/styles/` renders a `SymbologyLayer`
+(`features/map/layers/symbology/`), which fetches `symbology-config.json` from
+the Realtime server and applies it on mount and on every live reload. Changing a
+layer's standing symbology therefore needs no code change: edit the config.
+`buildRenderer.js` turns that config into an ArcGIS renderer.
 
-**Server-driven (the default).** `SymbologyLayer.jsx` fetches
-`symbology-config.json` from the Realtime server and applies it on mount and on
-every live reload. This is what each module in `layers/styles/` renders, and it
-is why changing a layer's standing symbology needs no code change.
-
-**Interactive.** `SymbologyWidget.jsx`, its own tab in the right sidebar, lets
-the user draw a layer by any of its columns — Single Symbol, Unique Values,
-Graduated Colors, Graduated Symbols — in ArcGIS Pro's vocabulary, with either
-shape or picture markers (`markerIcons.js`). It applies live as you change
-controls, and `Restore default symbology` puts back the renderer the layer had
-before the widget first touched it.
-
-**It applies nothing until you ask.** The widget mounts with the rest of the
-sidebar at app start, so a default config that applied on mount would silently
-replace whatever the layer's own style module had set — which is exactly what
-it did at first, wiping the customer layer's alarm-state picture markers. The
-`hasEdits` latch is what prevents that; changing which layer you are *looking
-at* deliberately does not trip it.
-
-Both produce the same config shape and hand it to the same `buildRenderer.js`,
-so there is one renderer builder rather than two. What the widget builds is
-exactly what could be written into `symbology-config.json` later.
-
-Two consequences worth knowing:
-
-- **Widget changes are session-only.** Nothing is persisted; a reload restores
-  the server config. A live config reload while the widget's renderer is
-  applied will also overwrite it.
-- **Colours are constrained on purpose.** Categorical hues are assigned in a
-  fixed, colour-blind-checked order and never cycled — past eight values the
-  rest fold into "Other", because a repeated hue means two categories that
-  cannot be told apart. Sequential ramps are single-hue and stop short of the
-  darkest steps so no class disappears into dark imagery. The reasoning and the
-  validator results are recorded in `symbologyPalettes.js`; read it before
-  adding a scheme. There is deliberately no diverging scheme — see that file.
+There is no interactive symbology tool; the old Symbology tab was removed.
 
 ---
 
