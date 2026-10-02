@@ -47,7 +47,6 @@ const DETAILS_TOOL = "Details";
 const ACTIONS = [
   { text: DETAILS_TOOL, icon: "information", featureKey: "tab_Details" },
   { text: "Layer", icon: "sliders-horizontal", featureKey: "tab_Layer" },
-  { text: "Symbology", icon: "palette", featureKey: "tab_Symbology" },
   { text: "Map Tools", icon: "widgets-source", featureKey: "tab_Map_Tools" },
   { text: "Filter", icon: "layer-filter", featureKey: "tab_Filter" },
   { text: "AI Chat", icon: "speech-bubbles", featureKey: "tab_AIChat" }
